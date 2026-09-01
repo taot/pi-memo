@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 540" width="1120" height="540" font-family="'Noto Sans CJK SC','Source Han Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8250df"/>
+    </marker>
+  </defs>
+
+  <rect width="1120" height="540" fill="#fbfbf9"/>
+
+  <text x="32" y="38" font-size="19" font-weight="600" fill="#1f2328">记忆条目的状态</text>
+  <text x="32" y="60" font-size="12.5" fill="#57606a">一个字段，两个值。被取代不是第三个值，而是一条由 GC 双向物化的边。</text>
+
+  <!-- ===== card 1: the state machine ===== -->
+  <rect x="32" y="88" width="520" height="360" rx="8" fill="#ffffff" stroke="#e4e2dc"/>
+  <text x="48" y="116" font-size="12.5" font-weight="600" fill="#1f2328">status —— 唯一的状态字段</text>
+
+  <rect x="64" y="140" width="200" height="100" rx="7" fill="#f2fbf4" stroke="#8fca9f" stroke-width="1.6"/>
+  <text x="80" y="166" font-size="13" font-weight="600" fill="#15803d">在用</text>
+  <text x="80" y="189" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">status: active</text>
+  <text x="80" y="209" font-size="11" fill="#1f2328">进索引 · 可召回（被取代的除外）</text>
+  <text x="80" y="228" font-size="10.5" fill="#57606a">默认值，写入时即是</text>
+
+  <rect x="64" y="316" width="200" height="100" rx="7" fill="#f4f4f2" stroke="#b9b7b0" stroke-width="1.6"/>
+  <text x="80" y="342" font-size="13" font-weight="600" fill="#4a4a45">已归档</text>
+  <text x="80" y="365" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">status: archived</text>
+  <text x="80" y="385" font-size="11" fill="#1f2328">不进索引 · 不可召回</text>
+  <text x="80" y="404" font-size="9.5" fill="#57606a">必带 archived_reason · archived_at</text>
+
+  <line x1="118" y1="246" x2="118" y2="310" stroke="#57606a" stroke-width="1.4" marker-end="url(#a)"/>
+  <line x1="206" y1="310" x2="206" y2="246" stroke="#8250df" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ap)"/>
+
+  <text x="290" y="252" font-size="11" font-weight="600" fill="#1f2328">↓ 归档 —— 三个来源</text>
+  <text x="302" y="271" font-size="10.5" fill="#57606a">memory_forget（模型判断，必须给 reason）</text>
+  <text x="302" y="288" font-size="10.5" fill="#57606a">/mneme-gc --apply（你在报告里勾选）</text>
+  <text x="302" y="305" font-size="10.5" fill="#8250df">GC 物化取代关系（判断来自 revise）</text>
+
+  <text x="290" y="336" font-size="11" font-weight="600" fill="#8250df">↑ 复活 —— 两个来源</text>
+  <text x="302" y="355" font-size="10.5" fill="#57606a">你手改 frontmatter</text>
+  <text x="302" y="372" font-size="10.5" fill="#8250df">GC：继任者失去承接能力时</text>
+
+  <text x="290" y="400" font-size="10.5" fill="#57606a">手改随时可逆转，唯一例外是被取代的</text>
+  <text x="290" y="417" font-size="10.5" fill="#57606a">条目 —— 它的 status 是派生物，会被改回。</text>
+
+  <!-- ===== card 2: superseded ===== -->
+  <rect x="576" y="88" width="512" height="180" rx="8" fill="#fffaf0" stroke="#e5b769" stroke-width="1.3"/>
+  <text x="592" y="114" font-size="12.5" font-weight="600" fill="#8a4b08">被取代 —— 是关系，GC 把它物化成 archived</text>
+  <text x="592" y="137" font-size="10.5" fill="#1f2328">真相：另有一条 active 记忆 supersedes 我（supersedes 反向索引）</text>
+  <text x="592" y="158" font-size="10.5" fill="#1f2328">GC 双向物化到 status：</text>
+  <text x="606" y="177" font-size="10.5" fill="#1f2328">· 有 active 继任者 → archived（reason 取继任者的 supersede_reason）</text>
+  <text x="606" y="196" font-size="10.5" fill="#1f2328">· 继任者失去承接能力 → 复活为 active，清掉 superseded_by</text>
+  <text x="592" y="219" font-size="10.5" fill="#8a4b08">链 A ← B ← C：B 虽已 archived，但知识由 C 承接 —— A 不复活</text>
+  <text x="592" y="238" font-size="10.5" fill="#57606a">判据：继任者不再 active，且它自己的 superseded_by 为空（非空才归 GC 管）</text>
+  <text x="592" y="259" font-size="10.5" fill="#8a4b08">检索判据 = archived ∨ 有 active 继任者 —— revise 后即刻生效，不等 GC</text>
+
+  <!-- ===== card 3: the two non-states ===== -->
+  <rect x="576" y="284" width="512" height="164" rx="8" fill="#ffffff" stroke="#e4e2dc"/>
+  <text x="592" y="310" font-size="12.5" font-weight="600" fill="#1f2328">两件仍然不是状态的事</text>
+
+  <text x="592" y="334" font-size="12" font-weight="600" fill="#4a4a45">文件在哪个目录 —— GC 依 status 物化的视图</text>
+  <text x="592" y="354" font-size="10.5" fill="#1f2328">顺序固定：关系 → status → 目录，被取代的条目照搬进 archive/</text>
+  <text x="592" y="372" font-size="10.5" fill="#57606a">memory_forget 只翻状态不挪文件；两次 GC 之间以 status 为准</text>
+
+  <text x="592" y="400" font-size="12" font-weight="600" fill="#a04040">删除 —— 在系统之外</text>
+  <text x="592" y="420" font-size="10.5" fill="#1f2328">永不自动发生。归档不删文件，被取代也不删文件</text>
+  <text x="592" y="438" font-size="10.5" fill="#57606a">只有你 git rm，且可从 git 恢复（L1 自己也是一个仓库）</text>
+
+  <!-- ===== footer invariant ===== -->
+  <rect x="32" y="464" width="1056" height="52" rx="8" fill="#ffffff" stroke="#e4e2dc"/>
+  <text x="48" y="487" font-size="11.5" fill="#1f2328">不变量：<tspan font-weight="600">GC 能写 status，当且仅当它在物化一个已经存在的判断。</tspan>它自己从不判断任何事。</text>
+  <text x="48" y="506" font-size="10.5" fill="#57606a">verify 失败 · URL 挂了 · hits == 0 且 age &gt; 90d —— 机械规则的发现只进报告，等你定夺；报告只扫 active 条目。</text>
+</svg>
