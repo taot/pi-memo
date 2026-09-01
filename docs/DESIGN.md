@@ -9,9 +9,21 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
 - 每个 session 启动时注入轻量索引，让模型知道有哪些记忆可查。
 - 每条记忆独立存储，不维护条目之间的关系。
 
-## 2. 记忆类型与作用域
+## 2. 论文映射
 
-### 2.1 类型
+设计参照 Hu et al., *Memory in the Age of AI Agents: A Survey* (arXiv 2512.13564v2)。
+
+| 论文维度 | 本设计 |
+|---|---|
+| **Form** (§3) | Token-level、1D flat；每条记忆是独立的 Markdown 文件 |
+| **Function** (§4) | Factual（user、environment）与 Experiential（insight） |
+| **Formation** (§5.1) | Knowledge distillation，由 LLM 显式调用 `memory_write` |
+| **Evolution** (§5.2) | `memory_revise` 原地更新，`memory_forget` 直接删除 |
+| **Retrieval** (§5.3) | session 启动时注入索引快照，由 LLM 显式调用 `memory_recall` |
+
+## 3. 记忆类型与作用域
+
+### 3.1 类型
 
 | `kind` | 内容 |
 |---|---|
@@ -21,7 +33,7 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
 
 `env` 和 `exp` 的区分方式：能通过读代码、查文档或运行只读命令核实的是 `env`；属于实践后的选择和经验的是 `exp`。
 
-### 2.2 作用域
+### 3.2 作用域
 
 | `scope` | 含义 | 可用类型 |
 |---|---|---|
@@ -30,7 +42,7 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
 
 `project × user` 非法，工具应直接报错。
 
-## 3. 存储
+## 4. 存储
 
 ```text
 ~/.pi/mneme/                     # 全局记忆
@@ -51,7 +63,7 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
 
 项目记忆随 repo 进入 git。`.cache/` 和 `.local/` 加入 gitignore。
 
-### 3.1 记忆文件
+### 4.1 记忆文件
 
 一个文件保存一条可独立成立的结论。文件名为 `<id>.md`，正文通常不超过 200 字。
 
@@ -82,7 +94,7 @@ Wayland 协议没有“把窗口放到 (x, y)”的请求。winit 的
 - `tags` 可选。
 - frontmatter 和正文都不保存对其他记忆条目的引用关系。
 
-### 3.2 `verify`
+### 4.2 `verify`
 
 ```yaml
 verify:
@@ -99,7 +111,7 @@ verify:
 
 `ref` 不带行号，`expect` 不能为空。`command` 在写入时由模型确认是只读命令。
 
-### 3.3 索引
+### 4.3 索引
 
 `MEMORY.md` 自动生成：
 
@@ -116,9 +128,9 @@ verify:
 
 每行只包含 id 和 title。索引由 `/mneme-gc` 或 session 启动时重建，不手工编辑。
 
-## 4. 工具
+## 5. 工具
 
-### 4.1 `memory_recall`
+### 5.1 `memory_recall`
 
 ```typescript
 Type.Object({
@@ -135,7 +147,7 @@ Type.Object({
 
 按 query 检索，或用 ids 直接读取指定条目。返回全文、id 和 scope。命中的条目累计 `hits` 并更新 `last_hit`。
 
-### 4.2 `memory_write`
+### 5.2 `memory_write`
 
 ```typescript
 Type.Object({
@@ -163,7 +175,7 @@ Type.Object({
 
 写入前按 id 和 title 查重。id 已存在时拒绝写入；标题高度相似时返回候选条目，让模型决定是否改用 `memory_revise`。
 
-### 4.3 `memory_revise`
+### 5.3 `memory_revise`
 
 ```typescript
 Type.Object({
@@ -188,7 +200,7 @@ Type.Object({
 
 直接更新原文件，保留 `id`、`scope`、`kind` 和 `created`，并把 `updated` 设为当前时间。省略字段表示保持不变，`null` 表示清空可选字段。
 
-### 4.4 `memory_forget`
+### 5.4 `memory_forget`
 
 ```typescript
 Type.Object({
@@ -198,16 +210,16 @@ Type.Object({
 
 直接删除对应的记忆文件，并从索引和检索缓存中移除。
 
-### 4.5 工具引导
+### 5.5 工具引导
 
 `promptGuidelines` 加入两条：
 
 - 遇到与预期不符的环境行为，或花了多轮才解决的问题，解决后写一条 `exp`。
 - 索引里有相关条目时先调用 `memory_recall` 获取全文，不根据索引标题猜测内容。
 
-## 5. Session 生命周期
+## 6. Session 生命周期
 
-### 5.1 启动与索引注入
+### 6.1 启动与索引注入
 
 ```typescript
 let sessionIndex: AgentMessage;
@@ -231,7 +243,7 @@ pi.on("context", async (event) => ({
 
 同一 session 中的写入、更新和删除立即落盘，但索引快照在下一个 session 才刷新。
 
-### 5.2 使用统计
+### 6.2 使用统计
 
 `memory_recall` 的命中增量先保存在内存中，`agent_settled` 时批量合并到各 store 的 `.local/usage.json`：
 
@@ -246,11 +258,11 @@ pi.on("context", async (event) => ({
 
 删除记忆时同步删除对应的 usage 记录。
 
-### 5.3 并发约束
+### 6.3 并发约束
 
 同一个 store 同一时刻只允许一个 session 写入。多个 session 可以并发读取。
 
-## 6. 检索
+## 7. 检索
 
 使用 BM25 检索，不同语言和代码标识符走同一套分词流程：
 
@@ -276,7 +288,7 @@ score = bm25(query, title*3 + body + tags*2)
 
 `.cache/` 保存倒排索引、源文件哈希和 tokenizer 版本，均可从记忆文件重建。
 
-## 7. `/mneme-gc`
+## 8. `/mneme-gc`
 
 `/mneme-gc` 由用户手动触发，依次执行：
 
@@ -291,7 +303,7 @@ score = bm25(query, title*3 + body + tags*2)
 
 URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面正文做内容检查；无 UI 且未显式指定时跳过内容检查。
 
-## 8. `/mneme-stats`
+## 9. `/mneme-stats`
 
 输出：
 
@@ -300,7 +312,7 @@ URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面�
 - 每周新增与更新数量。
 - 当前索引条目数、token 数和上限。
 
-## 9. 代码结构与阶段
+## 10. 代码结构与阶段
 
 ```text
 pi-mneme/
@@ -333,7 +345,7 @@ pi-mneme/
 | M1 | `memory_revise`、`memory_forget`、BM25、缓存 | 更新和删除立即落盘，新会话检索结果正确 |
 | M2 | `/mneme-gc`、`/mneme-stats` | 连续使用两周并检查报告和指标 |
 
-## 10. 已知风险
+## 11. 已知风险
 
 | 风险 | 应对 |
 |---|---|
