@@ -14,7 +14,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 - 三类长期记忆：user factual / environment factual / experiential(insight)
 - 人类可读的 markdown 存储，可 diff、可手改、可进 git
 - 记忆操作作为 LLM 显式 tool call
-- 常驻注入一份轻量索引，让模型知道有什么可查
+- 每个 session 启动时在消息前部注入一份轻量索引快照，让模型知道有什么可查
 
 **v1 明确不做，及理由：**
 
@@ -36,7 +36,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 | **Function** (§4) | Factual(user + environment) + Experiential(insight) | 覆盖 coding agent 收益最大的三块。 |
 | **Formation** (§5.1) | Knowledge distillation，由 LLM 显式调用 | 不做 semantic summarization（会丢细节）。一条记忆 = 一个可独立成立的结论。 |
 | **Evolution** (§5.2) | 软失效 + 手动 GC | 论文 §5.2.2 指出早期系统（MemGPT/Mem0）的 destructive replace "erasing valuable historical context and breaking temporal continuity"；Zep 改用时间戳软失效。我们照 Zep 的思路，且 git 本身就是历史。 |
-| **Retrieval** (§5.3) | 常驻索引 + 显式 `memory_recall` | 论文 §7.2 主张把记忆操作变成 agent 的显式 tool call，理由是可解释、可追溯、行为一致。索引常驻是对 §5.3.1 提到的 silent failure mode 的对冲，见 §6.1。 |
+| **Retrieval** (§5.3) | session 启动时加载索引快照 + 显式 `memory_recall` | 论文 §7.2 主张把记忆操作变成 agent 的显式 tool call，理由是可解释、可追溯、行为一致。前置索引是对 §5.3.1 提到的 silent failure mode 的对冲，见 §6.1。 |
 
 ---
 
@@ -69,7 +69,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 | 事件 | 实际发生的事 |
 |---|---|
-| `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——但它**立即**退出索引与检索（判定见下方不变量）；字段改成 `archived` 要等下一次 GC（§3.3） |
+| `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——它从下一个 session 的索引与检索快照中退出（判定见下方不变量）；字段改成 `archived` 要等下一次 GC（§3.3） |
 | GC 清理 `active` 条目的失效 `superseded_by` | 只清物化标记，`status` 不动——继任者在首次 GC 前已失去承接能力时，旧条目本来就是 `active`，无需“复活”（§3.3） |
 | `verify` 失败、URL 挂掉、`hits == 0 且 age > 90d` | 只进 GC 报告，等你定夺（§8 B 组） |
 | GC 在 `archive/` 与 kind 目录之间搬文件 | `status` 的下游物化，不是它的输入（§3.4） |
@@ -77,7 +77,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 **不变量**：
 
-- **不进索引、不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它。** 两个析取项缺一不可：字段是持久真相，反向索引推导是即时真相，取代关系在 `memory_revise` 那一刻就生效，不等 GC 把它写进字段（§3.3、§7）。
+- **不进索引、不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它。** 两个析取项缺一不可：字段是持久真相，反向索引推导在 session 启动时构建快照。取代关系不等 GC 物化就会进入下一个 session 的快照（§3.3、§7）。
 - 任何 `archived` 条目必有非空 `archived_reason` 和 `archived_at`；两者随状态一起写、一起清。
 - 对一个 `archived` 条目：`superseded_by` 非空 ⟺ 这个 `archived` 由取代关系物化而来，GC 可以撤销它；为空则 GC 永不改写它的 `status`。（`active` 条目也可能带着 `superseded_by`——那是 revise 之后、GC 之前的样子。）
 - 归档不删文件，被取代不删文件。删除只由 `git rm` 发生。
@@ -111,7 +111,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 这与 §3.4 的目录搬运是同一个模式，连"必须双向"的理由都一样：少了反向那一半，继任者一消失，前任就永久停在 `archived`，而没有任何继任者顶上——那条知识就静默消失了。
 
-**推导即时生效，物化随后收敛。** 检索的排除判据是析取的：`status: archived` **或**存在 `active` 继任者（§3.1 不变量）。第二个析取项不能省——GC 是手动低频操作，`.cache/` 却在每次会话启动时按 mtime 重建（§6.2），两者之间可以隔几周。省掉推导就意味着这几周里旧条目照常被召回，和它的继任者一起竞争排序，而 `memory_revise` 的全部意义就是让新的那条顶掉旧的。**取代必须在 revise 那一刻就生效，而不是在你想起来跑 GC 的那一刻。**
+**推导在下一个 session 加载时生效，物化由 GC 随后收敛。** 检索的排除判据是析取的：`status: archived` **或**存在 `active` 继任者（§3.1 不变量）。第二个析取项不能省——GC 是手动低频操作，`.cache/` 则在每次 session 启动时按 mtime 重建（§6.1），两者之间可以隔几周。省掉推导就意味着这几周里旧条目仍会和继任者一起进入新 session 的候选集。本设计不处理同一 session 内记忆变更后的索引与检索刷新；`memory_write` / `memory_revise` / `memory_forget` 只负责落盘，变更从下一个 session 起可见。
 
 **那物化 `status` 买到了什么。** 不是简化读取路径——推导仍在。买到的是另外四样：
 
@@ -132,11 +132,11 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 | 消费者 | 认哪一层 | 滞后 |
 |---|---|---|
-| 检索与索引构建 | 关系（析取判据，§3.1） | 无——revise 后立刻生效 |
+| 检索与索引构建 | 关系（析取判据，§3.1） | 到下一个 session 启动 |
 | 人读单个文件、GC 报告分组 | `status` 字段 | 到下次 GC |
 | 人浏览目录 | `archive/` 的位置 | 到下次 GC |
 
-所以 `memory_revise` 不当场改 `status` 不构成正确性问题：它影响的是后两行，那两行本来就容忍滞后（§3.4 那句"跑之间以 `status` 为准"是同一个意思）。会被召回的那一行不滞后。
+所以 `memory_revise` 不当场改 `status` 不构成正确性问题：索引与检索明确容忍到下一个 session 的滞后，后两行则本来就容忍到下次 GC 的滞后（§3.4 那句"跑之间以 `status` 为准"是同一个意思）。
 
 **代价：手改被取代条目的 `status` 无效。** 它是派生物，你改成 `active`，下次 GC 又依关系改回 `archived`（§3.2 开头那句"随时可逆转"的唯一例外）。要真正复活一条被取代的记忆，得动继任者——删掉继任者的 `supersedes` 字段，或者把继任者归档。
 
@@ -353,7 +353,7 @@ verify:
 | 字段 | 记的是 | 谁写 | 何时清空 |
 |---|---|---|---|
 | `created` | 这条知识写下来的时刻 | `memory_write` / `memory_revise` 建新条目时 | 永不 |
-| `last_hit` | 上次被 `memory_recall` 命中 | `agent_settled` 批量回写（§6.3） | 永不 |
+| `last_hit` | 上次被 `memory_recall` 命中 | `agent_settled` 批量回写（§6.2） | 永不 |
 | `archived_at` | 置 `archived` 的时刻 | `memory_forget`、`/mneme-gc`（§3.1 转移表） | 随 `archived_reason` 一起，在复活时清掉 |
 
 ```yaml
@@ -392,7 +392,7 @@ archived_at: null
 - [e2e-window-positioning-via-kdotool](exp/e2e-window-positioning-via-kdotool.md) — E2E 窗口定位走 kdotool，没选"断言不依赖绝对坐标"
 ```
 
-每条一行：id + 一句钩子（取自 title）。**索引是唯一常驻进 context 的东西**，预算见 §6.1。
+每条一行：id + 一句钩子（取自 title）。**索引是唯一在 session 启动时加载并常驻 context 的记忆内容**，预算见 §6.1。
 
 ---
 
@@ -461,7 +461,7 @@ Type.Object({
 })
 ```
 
-**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。旧条目在下次 GC 前虽然仍是 `status: active`，但取代关系立即生效，因此已经退出普通索引与检索，不会再作为候选被召回；按 id 显式读取历史条目时仍可看到 `superseded_by` 和取代提示（§7）。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。本 session 保留启动时的索引与检索快照，不因 revise 刷新；下一个 session 构建候选集时，取代关系会让旧条目退出普通索引与检索。按 id 显式读取历史条目时仍可看到 `superseded_by` 和取代提示（§7）。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
 
 `supersede_reason` 必须落盘还有第二个用处：GC 归档旧条目时要拿它填 `archived_reason`（`archived` 强制带理由，§3.1）。
 
@@ -474,7 +474,7 @@ Type.Object({
 })
 ```
 
-置 `status: archived`，把 `reason` 写进 `archived_reason`、当前时刻写进 `archived_at`（§4.2.4），移出索引。**不移动文件**——物理归档由 `/mneme-gc` 统一做（§3.4）。永不删文件。
+置 `status: archived`，把 `reason` 写进 `archived_reason`、当前时刻写进 `archived_at`（§4.2.4），并从下一个 session 的索引与检索快照中移除。**不移动文件**——物理归档由 `/mneme-gc` 统一做（§3.4）。永不删文件。
 
 `reason` 必须落盘。不写下来它就只是一次性的 tool call 参数，将来你看到一条被归档的记忆，只能去翻 git log 才知道当初为什么。
 
@@ -495,28 +495,32 @@ Type.Object({
 
 pi 的扩展 API（`packages/coding-agent/src/core/extensions/types.ts`）提供的挂钩，我们只用三个。
 
-### 6.1 `context` — 注入索引
+### 6.1 `session_start` + `context` — 加载一次，前置索引
 
 ```typescript
-pi.on("context", async (event) => {
-  const block = renderIndex();           // L1 + L2 合并后的索引
-  const messages = stripPrevious(event.messages, MNEME_MARKER);
-  return { messages: [...messages, indexMessage(block)] };
+let sessionIndex: AgentMessage;
+
+pi.on("session_start", async () => {
+  rebuildCacheIfStale();                 // 扫描 L1 + L2，按 mtime 校验 .cache/
+  sessionIndex = indexMessage(renderIndex());
 });
+
+pi.on("context", async (event) => ({
+  messages: [sessionIndex, ...event.messages],
+}));
 ```
 
+`session_start` 扫描 L1 + L2，构建/校验 `.cache/` 索引，并渲染一份属于该 session 的索引快照。`context` 只把这份固定快照放在消息列表最前面；它不重新扫描、不重新渲染，也不在尾部追加新版本。
+
 要点：
-- 用 marker 保证 context 里**永远只有一份**索引，且永远是最新的（记忆在会话中途被写入时索引会变）。
-- 位置放在消息尾部而非系统提示：长会话里尾部注意力更好，且不需要动 `BuildSystemPromptOptions`。
+- 新建、`resume`、`fork` 都会触发 `session_start` 并重新加载——记忆可能在别的 session 里改过。
+- 索引是 **session 级快照**。同一 session 内的 write / revise / forget 只落盘，不刷新当前索引或 `.cache/`；下一个 session 再统一可见。
+- 前置位置固定，不需要 marker 去重，也不需要管理同一 session 中的索引版本。
 - **Token 预算 600**。超了就按 `scope` 优先级 + `last_hit` 近度截断，并在末尾标注 `(N more, use memory_recall to search)`。索引无声地膨胀到几千 token 是这个设计最现实的退化路径。
 
 不用 `resources_discover`：那个事件只接受 `skillPaths` / `promptPaths` / `themePaths`，不是通用注入点。
 
-### 6.2 `session_start` — 加载
-
-扫描 L1 + L2，构建/校验 `.cache/` 索引（按文件 mtime 判断是否需要重建），渲染索引块。`reason` 为 `resume`/`fork` 时同样重建——记忆可能在别的会话里改过了。
-
-### 6.3 `agent_settled` — 只做记账
+### 6.2 `agent_settled` — 只做记账
 
 把 `memory_recall` 累积的 hit 计数批量写回 frontmatter。**不做任何自动蒸馏或整理**——这是你选的边界，我在这里守住它。
 
@@ -536,9 +540,9 @@ score = bm25(query, title*3 + body + tags*2)
       * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
 ```
 
-**不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它**（§3.1 不变量）。两项都在索引构建时判定，写进 `.cache/`：第一项读 frontmatter，第二项查反向索引——那张表本来就要为 `because` 而建（§4.2.2），增量成本为零。打分函数只面对已经筛过的候选集，不重复判断。
+**不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它**（§3.1 不变量）。两项都在 session 启动时构建索引快照时判定，写进 `.cache/`：第一项读 frontmatter，第二项查反向索引——那张表本来就要为 `because` 而建（§4.2.2），增量成本为零。打分函数只面对已经筛过的候选集，不重复判断。
 
-第二项不能省：GC 手动低频，`.cache/` 却每次会话启动就按 mtime 重建（§6.2），省掉它，被取代的记忆会在 revise 之后、GC 之前这段可能长达几周的窗口里继续和继任者一起被召回（§3.3）。
+第二项不能省：GC 手动低频，`.cache/` 却每次 session 启动就按 mtime 重建（§6.1），省掉它，被取代的记忆会在 revise 之后、GC 之前这段可能长达几周的窗口里继续和继任者一起进入新 session 的召回候选（§3.3）。
 
 用 `ids` 直接点名仍可读到，带 `superseded_by` 或有 `active` 继任者的会附上"已被 `<new-id>` 取代"。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
 

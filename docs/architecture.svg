@@ -51,8 +51,8 @@
   <rect x="336" y="116" width="360" height="132" rx="6" fill="#fffaf3" stroke="#f0d9b5"/>
   <text x="352" y="139" font-size="13.5" font-weight="600" fill="#1f2328">索引注入器</text>
   <text x="352" y="162" font-size="11.5" fill="#57606a">扫描 L1 + L2，渲染成一份统一索引</text>
-  <text x="352" y="183" font-size="11.5" fill="#57606a">marker 去重：context 里永远只有一份、且最新</text>
-  <text x="352" y="204" font-size="11.5" fill="#57606a">追加在消息尾部，不动系统提示</text>
+  <text x="352" y="183" font-size="11.5" fill="#57606a">session 启动时加载一次，保留固定快照</text>
+  <text x="352" y="204" font-size="11.5" fill="#57606a">放在消息最前面，session 内不刷新</text>
   <rect x="352" y="215" width="240" height="21" rx="4" fill="#fdf0dd"/>
   <text x="362" y="230" font-size="11.5" font-weight="600" fill="#8a4b08">硬预算 ≤600 token，超出即截断</text>
 
@@ -109,10 +109,10 @@
 
   <!-- ============ arrows A -> B ============ -->
   <line x1="268" y1="144" x2="330" y2="150" stroke="#57606a" stroke-width="1.3" marker-end="url(#ar)"/>
-  <text x="272" y="137" font-size="10.5" fill="#57606a">构建缓存</text>
+  <text x="272" y="137" font-size="10.5" fill="#57606a">加载快照</text>
 
   <line x1="268" y1="220" x2="330" y2="200" stroke="#57606a" stroke-width="1.3" marker-end="url(#ar)"/>
-  <text x="272" y="238" font-size="10.5" fill="#57606a">注入索引块</text>
+  <text x="272" y="238" font-size="10.5" fill="#57606a">前置索引块</text>
 
   <line x1="268" y1="338" x2="330" y2="338" stroke="#57606a" stroke-width="1.3" marker-start="url(#arS)" marker-end="url(#ar)"/>
   <text x="272" y="331" font-size="10.5" fill="#57606a">调用 / 结果</text>
@@ -143,5 +143,5 @@
   <text x="568" y="686" font-size="11.5" fill="#57606a">软失效 + 手动 GC，不做破坏性覆盖</text>
 
   <text x="838" y="686" font-size="12" font-weight="600" fill="#1f2328">Retrieval §5.3</text>
-  <text x="954" y="686" font-size="11.5" fill="#57606a">常驻索引 + 显式 recall</text>
+  <text x="954" y="686" font-size="11.5" fill="#57606a">session 快照 + 显式 recall</text>
 </svg>
