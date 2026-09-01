@@ -151,6 +151,8 @@ Type.Union([
 
 `query` 和 `ids` 必须提供一个，且只能提供一个。按 query 检索，或用 ids 直接读取指定条目。返回全文、id 和 scope。命中的条目累计 `hits` 并更新 `last_hit`。
 
+所有按 id 操作的工具都先检查全局与当前项目的组合视图。若同一 id 对应两个或更多记忆文件，包括同一 store 的不同 kind 之间或 global 与 project 之间，工具直接报错并提示用户手工解决；不得读取、修改、删除该 id，也不得为其写入 usage、索引或检索缓存。
+
 ### 5.2 `memory_write`
 
 ```typescript
@@ -177,7 +179,7 @@ Type.Object({
 })
 ```
 
-写入前按 id 和 title 查重。id 已存在时拒绝写入；标题高度相似时返回候选条目，让模型决定是否改用 `memory_revise`。写入成功后立即更新索引和检索缓存。
+写入前在全局与当前项目的组合视图中按 id 和 title 查重，无论目标 scope 是 global 还是 project。任一 scope 中已存在该 id 时拒绝写入；标题高度相似时返回候选条目，让模型决定是否改用 `memory_revise`。写入成功后立即更新索引和检索缓存。
 
 ### 5.3 `memory_revise`
 
@@ -218,7 +220,7 @@ Type.Object({
 
 `promptGuidelines` 加入两条：
 
-- 遇到与预期不符的环境行为，或花了多轮才解决的问题，解决后写一条 `exp`。
+- 可核实的原因或事实写成 `env`；解决过程中得到的策略和“下次怎么办”写成 `exp`，必要时分别写两条。
 - 索引里有相关条目时先调用 `memory_recall` 获取全文，不根据索引标题猜测内容。
 
 ## 6. Session 生命周期
@@ -241,7 +243,7 @@ pi.on("context", async (event) => ({
 
 `session_start` 扫描全局和项目记忆。源文件哈希变化时重建缓存，并生成当前 session 的固定索引快照。新建、resume 和 fork 都重新加载。
 
-全局与项目记忆出现同名 id 时，两条都不进入索引和检索缓存，并在索引消息中报告冲突路径。
+组合视图中同一 id 对应两个或更多记忆文件时，冲突条目都不进入索引和检索缓存，并在索引消息中报告冲突路径、提示用户手工解决。所有工具对该 id 的操作都报错；冲突解决前不得通过工具写入该 id。
 
 索引最多注入 50 条或约 2000 token，先到者为准。超出时优先项目条目，再按 `last_hit` 从近到远排序；末尾提示剩余数量，并引导使用 `memory_recall` 搜索。
 
@@ -296,14 +298,14 @@ score = bm25(query, title*3 + body + tags*2)
 
 `/mneme-gc` 由用户手动触发，依次执行：
 
-1. 检查记忆文件格式和 id 冲突。
+1. 检查记忆文件格式和 id 冲突；发现 global 内部、project 内部或 global 与 project 之间的冲突时立即报错，列出冲突路径并提示用户手工解决。
 2. 执行 `env.verify` 检查。
 3. 识别标题或正文高度相似的条目。
 4. 找出超过 90 天仍未命中的条目。
 5. 重建 `MEMORY.md` 和 `.cache/`。
 6. 将结果写入 `<store>/GC-REPORT.md`。
 
-报告只给出候选项和建议，不修改或删除记忆。处理结果由模型调用 `memory_revise` 或 `memory_forget` 落盘。
+发现 id 冲突时 `/mneme-gc` 在执行后续步骤以及写入报告、索引或缓存之前终止。没有冲突时，报告只给出候选项和建议，不修改或删除记忆；处理结果由模型调用 `memory_revise` 或 `memory_forget` 落盘。
 
 URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面正文做内容检查；无 UI 且未显式指定时跳过内容检查。
 
