@@ -70,6 +70,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 | 事件 | 实际发生的事 |
 |---|---|
 | `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——但它**立即**退出索引与检索（判定见下方不变量）；字段改成 `archived` 要等下一次 GC（§3.3） |
+| GC 清理 `active` 条目的失效 `superseded_by` | 只清物化标记，`status` 不动——继任者在首次 GC 前已失去承接能力时，旧条目本来就是 `active`，无需“复活”（§3.3） |
 | `verify` 失败、URL 挂掉、`hits == 0 且 age > 90d` | 只进 GC 报告，等你定夺（§8 B 组） |
 | GC 在 `archive/` 与 kind 目录之间搬文件 | `status` 的下游物化，不是它的输入（§3.4） |
 | `git rm` 一个条目 | 在状态机之外，文件消失，没有状态迁移（§3.5） |
@@ -104,6 +105,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 - X 有 `active` 继任者，而 X 仍是 `active` → 置 `archived`，`archived_reason` 写"被 `<new-id>` 取代：`<supersede_reason>`"，`archived_at` 取当前时刻，并确保 `superseded_by: <new-id>`；
 - X 是 `archived`、`superseded_by` 非空，而继任者已**失去承接能力** → 复活为 `active`，清掉 `archived_reason`、`archived_at` 和 `superseded_by`。
+- X 仍是 `active`、`superseded_by` 非空，而继任者已**失去承接能力** → `status` 不动，只清掉失效的 `superseded_by`。这是 revise 后首次 GC 之前继任者就被 forget 或消失的情况；X 从未物化成 `archived`，所以无需复活。
 
 "失去承接能力"要顺着取代链判，不能只看继任者是不是 `active`。链 A ← B ← C（C 取代 B，B 取代 A）里 B 必然是 `archived`，但知识由 C 承接着，A 不该复活。判据是**继任者不再 `active`，且它自己的 `superseded_by` 为空**——即它是被 `memory_forget` 归档的、或者文件根本不在了，链到此为止，没有下一棒。继任者若也是因取代而归档，跳过它，A 保持 `archived`。这条判据与 `memory_forget` 那句提示（本节下文）严丝合缝：归档一条 `supersedes` 了别人的记忆，恰恰就是把链掐断，前任因此复活。
 
@@ -124,7 +126,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 **`superseded_by` 因此升级成了判据。** 光看 `status: archived` 分不出这条是被 `memory_forget` 归档的（GC 绝不能碰）还是被取代归档的（GC 该在继任者消失时复活它）；`superseded_by` 非空就是这个区分。它同时仍是给人看的标记——人打开 `exp/foo.md` 能直接看见自己被谁取代了，不必 grep 整个库找 `supersedes: foo`。所以 `memory_revise` 当场就往旧文件写 `superseded_by: <new-id>`，不等 GC。
 
-它不再是"烂掉也无所谓"的装饰，规则收紧为两条：反向索引永远是真相，标记与推导冲突时推导赢；GC 发现悬空的 `superseded_by`（继任者已不存在）时，**先复活再清标记**——顺序反了就会把一条没有继任者的记忆永久留在 `archived`。
+它不再是"烂掉也无所谓"的装饰，规则收紧为两条：反向索引永远是真相，标记与推导冲突时推导赢；GC 发现失效的 `superseded_by`（继任者已不存在或已失去承接能力）时必须清理。若旧条目已是 `archived`，则**先复活再清标记**——顺序反了会把一条没有继任者的记忆永久留在 `archived`；若旧条目仍是 `active`，直接清标记即可。
 
 **三层链条，各自的滞后各自认。** 关系 → `status` → 目录，每一层都是上一层的滞后物化，而每一层的消费者只认自己够得着的那层真相：
 
@@ -461,7 +463,7 @@ Type.Object({
 })
 ```
 
-**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。所以旧条目在下次 GC 前仍是 `active`，仍可能被召回；`superseded_by` 会跟着一起返回，模型看得见它已被谁取代。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。旧条目在下次 GC 前虽然仍是 `status: active`，但取代关系立即生效，因此已经退出普通索引与检索，不会再作为候选被召回；按 id 显式读取历史条目时仍可看到 `superseded_by` 和取代提示（§7）。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
 
 `supersede_reason` 必须落盘还有第二个用处：GC 归档旧条目时要拿它填 `archived_reason`（`archived` 强制带理由，§3.1）。
 
@@ -556,7 +558,7 @@ score = bm25(query, title*3 + body + tags*2)
 
 按固定顺序，每一步的输出是下一步的输入：
 
-1. 依取代关系物化 `status`，双向：有 `active` 继任者的置 `archived`（`archived_reason` 取继任者的 `supersede_reason`，`archived_at` 取当前时刻）；`archived` 且 `superseded_by` 悬空的复活为 `active`，清掉 `archived_reason`、`archived_at` 和标记——**先复活再清标记**（§3.3）
+1. 依取代关系物化 `status` 并清理失效标记：有 `active` 继任者的置 `archived`（`archived_reason` 取继任者的 `supersede_reason`，`archived_at` 取当前时刻）；继任者已失去承接能力时，若旧条目是 `archived`，先复活为 `active`、清掉 `archived_reason` 和 `archived_at`，再清 `superseded_by`，若旧条目本来就是 `active`，则只清 `superseded_by`（§3.3）
 2. 依 `status` 物化文件位置，双向：`archived` 的移入 `archive/`，`active` 却躺在 `archive/` 里的移回对应的 kind 目录（§3.4、§4.2.3）
 3. 重建 MEMORY.md 和 `.cache/`
 4. L1 提交一次（§4.2.3）
