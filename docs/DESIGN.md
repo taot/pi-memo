@@ -456,12 +456,38 @@ Type.Object({
 ```typescript
 Type.Object({
   id: Type.String(),
+  new_id: Type.String({ description: "kebab-case, globally unique. The id of the replacement memory." }),
+  title: Type.String({ description: "One-line claim for the replacement memory." }),
   body: Type.String(),
   reason: Type.String({ description: "Why the old version was wrong or incomplete." }),
+  verify: Type.Optional(Type.Union([
+    Type.Object({
+      kind: Type.Union([Type.Literal("file"), Type.Literal("command"), Type.Literal("url")]),
+      ref: Type.String(),
+      expect: Type.String(),
+    }),
+    Type.Null(),
+  ], { description: "Omit to inherit; null to clear. Valid for kind=env only." })),
+  because: Type.Optional(Type.Union([
+    Type.Array(Type.String()),
+    Type.Null(),
+  ], { description: "Omit to inherit; null to clear." })),
+  tags: Type.Optional(Type.Union([
+    Type.Array(Type.String()),
+    Type.Null(),
+  ], { description: "Omit to inherit; null to clear." })),
+  links: Type.Optional(Type.Union([
+    Type.Array(Type.String()),
+    Type.Null(),
+  ], { description: "Omit to inherit; null to clear." })),
 })
 ```
 
-**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。本 session 保留启动时的索引与检索快照，不因 revise 刷新；下一个 session 构建候选集时，取代关系会让旧条目退出普通索引与检索。按 id 显式读取历史条目时仍可看到 `superseded_by` 和取代提示（§7）。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+`scope` 和 `kind` 从旧条目继承，v1 不允许在 revise 时改变。`verify` / `because` / `tags` / `links` 省略表示继承旧值，显式传 `null` 表示清空；继承或覆盖后的字段仍须通过 `memory_write` 的同一套 kind、引用与作用域校验。
+
+只允许 revise **有效 active** 条目：`status: active`，且反向索引中不存在有效继任者。若目标已经被取代，工具不写入，返回取代链当前的 active 叶节点，提示模型 revise 最新条目。v1 的取代关系严格保持单链，不支持从历史条目分叉。
+
+**不覆盖**：以 `new_id` 新建记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。本 session 保留启动时的索引与检索快照，不因 revise 刷新；下一个 session 构建候选集时，取代关系会让旧条目退出普通索引与检索。按 id 显式读取历史条目时仍可看到 `superseded_by` 和取代提示（§7）。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
 
 `supersede_reason` 必须落盘还有第二个用处：GC 归档旧条目时要拿它填 `archived_reason`（`archived` 强制带理由，§3.1）。
 
