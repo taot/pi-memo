@@ -552,6 +552,12 @@ pi.on("context", async (event) => ({
 
 把 `memory_recall` 累积的 hit 计数批量写回 frontmatter。**不做任何自动蒸馏或整理**——这是你选的边界，我在这里守住它。
 
+### 6.3 并发边界
+
+v1 不实现跨进程文件锁或多文件事务，使用约束是：**同一个 store 同一时刻只有一个 session 写入**。多个 session 可以同时读取，但不要同时调用 `memory_write` / `memory_revise` / `memory_forget` / `/mneme-gc`，也不要在另一个 session 落盘 hits 时并发修改同一条目。
+
+违反这条约束时可能发生 last-write-wins、hits 丢失或同一条目出现多个继任者；`session_start` 的源哈希重建只能发现落盘后的结果，不能消除写入竞争。这是 v1 为控制实现复杂度而明确接受的限制，见 §11。
+
 ---
 
 ## 7. 检索实现
@@ -718,4 +724,5 @@ pi-mneme/
 | 陈旧记忆误导（论文 §5.2.2 的 stability-plasticity） | `supersedes` 链让新条目顶掉旧的 + `env` 的 `verify` 自动查陈旧（§4.2.1）+ 召回时 `created` 随全文返回。索引行不带时间戳，理由见 §4.2.4 |
 | 项目层记忆进 git 泄露隐私 | user 层强制在 `~/.pi/`，永不进 repo；`.cache/` 默认 gitignore |
 | `verify.command` 实际产生副作用 | v1 由模型在写入时判断命令只读，不做静态分析、allowlist 或沙箱；只在信任的 repo 中运行 GC（§4.2.1） |
+| 多个 session 并发写同一 store | v1 不做跨进程锁或事务，要求同一 store 单写者；违反时可能覆盖写入、丢失 hits 或产生分叉（§6.3） |
 | flat 结构在多跳问题上召回不足 | §10 指标恶化时才上向量/图，打分函数已是单一入口 |
