@@ -212,6 +212,8 @@ verify:
 
 ### 3.2.3 `status` 与"被取代"
 
+![记忆条目生命周期](entry-lifecycle.svg)
+
 `status` 只有两态：
 
 | | 含义 | 谁写 |
@@ -267,7 +269,9 @@ verify:
 
 **物理布局：status 是真相，目录是 GC 维护的物化视图。**
 
-`memory_forget` 只翻 `status`，不动文件位置——快、可逆、不在会话中途制造路径变更。`/mneme-gc` 本来就要重建索引与缓存，顺手把 `status: archived` 的文件 `git mv` 进 `archive/`（保留 `env/` `exp/` 子结构）。
+`memory_forget` 只翻 `status`，不动文件位置——快、可逆、不在会话中途制造路径变更。`/mneme-gc` 本来就要重建索引与缓存，顺手依 `status` 物化位置。
+
+**物化是双向的**：`status: archived` 的 `git mv` 进 `archive/`（保留 `env/` `exp/` 子结构）；`status: active` 却躺在 `archive/` 里的移回去。少了反向这一半，你手改 status 复活一条记忆之后，它的位置会永久停在 `archive/`，位置与状态从此不一致。
 
 "翻状态"和"挪文件"分成两步，只针对**两次 GC 之间**被 `memory_forget` 归档的条目。GC 自己归档的没有时间差：步骤 4 你选"归档"写下状态，步骤 5 重建时自然捡起它一并移动（§7），同一次运行内完成，不需要特例。
 
@@ -462,7 +466,7 @@ score = bm25(query, title*3 + body + tags*2)
 **A. 自动修复——只碰派生物，从不碰记忆内容或状态。**
 
 - 重建 MEMORY.md 和 `.cache/`
-- 把 `status: archived` 的文件 `git mv` 进 `archive/`（§3.2.3）
+- 依 `status` 物化文件位置，双向：`archived` 的移入 `archive/`，`active` 却躺在 `archive/` 里的移回 `env/` 或 `exp/`（§3.2.3）
 - 清理悬空的 `superseded_by`（继任者已不存在）
 - L1 提交一次（§3.2.3）
 
