@@ -698,8 +698,8 @@ pi-mneme/
 |---|---|---|
 | **M0** | store 层（frontmatter 全字段，含 `verify` / `because`）+ `memory_write` / `memory_recall` + 索引注入 | 手动写 5 条记忆，新会话里模型能召回正确的那条 |
 | **M1** | `memory_revise` / `memory_forget` + BM25 打分 + `.cache/` | 迁移 `pi-dioxus/docs/memory/` 全部内容 |
-| **M2** | `/mneme-gc`（自动修派生物 + 报告）+ `/mneme-stats`（§10 指标） | 连用两周，看指标 |
-| **M3**（可选，看 M2 数据） | 向量召回；离线 consolidation；working memory（`session_before_compact`） | —— |
+| **M2** | `/mneme-gc`（自动修派生物 + 报告）+ `/mneme-stats`（§10 的 v1 指标） | 连用两周，看指标 |
+| **M3**（可选，看 M2 数据） | session 召回率遥测；向量召回；离线 consolidation；working memory（`session_before_compact`） | —— |
 
 **`verify` 和 `because` 从 M0 就要写入，尽管消费它们的逻辑要到 M2 才有。** 这两个字段记的是写入当下才知道的信息——当时靠什么核实、这个选择建立在什么前提上。M0/M1 期间攒下的记忆如果缺了它们，事后无法重建，M2 的陈旧检查和传播也就无从跑起。字段先行、逻辑后补，代价只是几行 frontmatter。
 
@@ -709,15 +709,14 @@ pi-mneme/
 
 这是本设计里唯一必须自动化的部分。论文 §5.3.1 的结论值得原样记住：当 agent 高估自己的知识、不去检索时，**系统会静默失效，没有任何错误信号**。既然写入和读取都交给了模型自觉，就必须能测出"模型到底有没有用"。
 
-`/mneme-stats` 输出：
+`/mneme-stats` 在 v1 输出：
 
-- **召回率**：有多少比例的会话至少调用过一次 `memory_recall`
 - **命中分布**：`hits == 0` 的记忆占比（写了从没被用过的死记忆）
 - **写入率**：每周新增多少条，分 scope
 - **归档复查**：最近归档的条目、`archived_reason` 和 `archived_at`。模型自行调用 `memory_forget` 不经你批准，这是你唯一能发现它删错东西的地方（§3.2）
 - **索引压力**：当前索引 token 数 / 600 预算
 
-判据：跑两周后如果 `hits == 0` 的记忆超过 60%，说明**要么写入质量差**（写了没用的东西）**要么召回失效**（模型不调工具）。两者的处理方式完全不同——前者改 `memory_write` 的引导语，后者才考虑加自动预检索。先量出来是哪个，再改。
+**session 召回率延后到 M3。** 要计算“多少比例的 session 至少调用过一次 `memory_recall`”，必须额外持久化 session run 总数和 recall 事件；v1 不引入这套遥测状态。相应地，`hits == 0` 超过 60% 在 v1 只是一条预警：它可能表示写入质量差，也可能表示模型不调工具，单凭现有数据不能区分，更不能据此直接决定加自动预检索。后续版本先补 session 召回率，再判断该改写入引导还是召回策略。
 
 ---
 
@@ -725,7 +724,7 @@ pi-mneme/
 
 | 风险 | 缓解 |
 |---|---|
-| 模型不调 `memory_recall`（silent failure） | 常驻索引 + §10 埋点。数据说话，不预先加自动检索。 |
+| 模型不调 `memory_recall`（silent failure） | 常驻索引；v1 只能通过 `hits == 0` 间接观察，无法与写入质量差区分。session 召回率遥测延后到 M3（§10） |
 | 索引膨胀吃 context | 600 token 硬预算 + 截断 + `/mneme-stats` 监控 |
 | 记忆写得太碎或太水 | 一文件一结论、`exp` 强制"下次怎么办"、写入前查重 |
 | 陈旧记忆误导（论文 §5.2.2 的 stability-plasticity） | `supersedes` 链让新条目顶掉旧的 + `env` 的 `verify` 自动查陈旧（§4.2.1）+ 召回时 `created` 随全文返回。索引行不带时间戳，理由见 §4.2.4 |
