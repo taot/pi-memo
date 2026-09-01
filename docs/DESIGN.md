@@ -111,7 +111,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 这与 §3.4 的目录搬运是同一个模式，连"必须双向"的理由都一样：少了反向那一半，继任者一消失，前任就永久停在 `archived`，而没有任何继任者顶上——那条知识就静默消失了。
 
-**推导在下一个 session 加载时生效，物化由 GC 随后收敛。** 检索的排除判据是析取的：`status: archived` **或**存在 `active` 继任者（§3.1 不变量）。第二个析取项不能省——GC 是手动低频操作，`.cache/` 则在每次 session 启动时按 mtime 重建（§6.1），两者之间可以隔几周。省掉推导就意味着这几周里旧条目仍会和继任者一起进入新 session 的候选集。本设计不处理同一 session 内记忆变更后的索引与检索刷新；`memory_write` / `memory_revise` / `memory_forget` 只负责落盘，变更从下一个 session 起可见。
+**推导在下一个 session 加载时生效，物化由 GC 随后收敛。** 检索的排除判据是析取的：`status: archived` **或**存在 `active` 继任者（§3.1 不变量）。第二个析取项不能省——GC 是手动低频操作，`.cache/` 则在每次 session 启动时比较记忆源哈希并在不一致时重建（§6.1），两者之间可以隔几周。省掉推导就意味着这几周里旧条目仍会和继任者一起进入新 session 的候选集。本设计不处理同一 session 内记忆变更后的索引与检索刷新；`memory_write` / `memory_revise` / `memory_forget` 只负责落盘，变更从下一个 session 起可见。
 
 **那物化 `status` 买到了什么。** 不是简化读取路径——推导仍在。买到的是另外四样：
 
@@ -501,7 +501,8 @@ pi 的扩展 API（`packages/coding-agent/src/core/extensions/types.ts`）提供
 let sessionIndex: AgentMessage;
 
 pi.on("session_start", async () => {
-  rebuildCacheIfStale();                 // 扫描 L1 + L2，按 mtime 校验 .cache/
+  const sourceHash = hashMemoryFiles();  // L1 + L2 记忆文件的确定性 SHA-256
+  rebuildCacheIfHashChanged(sourceHash);
   sessionIndex = indexMessage(renderIndex());
 });
 
@@ -510,10 +511,11 @@ pi.on("context", async (event) => ({
 }));
 ```
 
-`session_start` 扫描 L1 + L2，构建/校验 `.cache/` 索引，并渲染一份属于该 session 的索引快照。`context` 只把这份固定快照放在消息列表最前面；它不重新扫描、不重新渲染，也不在尾部追加新版本。
+`session_start` 扫描 L1 + L2，对记忆源计算确定性 SHA-256，用它构建/校验 `.cache/` 索引，并渲染一份属于该 session 的索引快照。`context` 只把这份固定快照放在消息列表最前面；它不重新扫描、不重新渲染，也不在尾部追加新版本。
 
 要点：
 - 新建、`resume`、`fork` 都会触发 `session_start` 并重新加载——记忆可能在别的 session 里改过。
+- 记忆源哈希的输入是按 `scope + 相对路径` 排序后的全部记忆文件，每项包含 scope、相对路径和文件字节。`.cache/` 保存 `source_hash`；只有哈希缺失或不一致时才重建。这会同时覆盖内容修改、新增、删除和重命名，不依赖文件时间戳。
 - 索引是 **session 级快照**。同一 session 内的 write / revise / forget 只落盘，不刷新当前索引或 `.cache/`；下一个 session 再统一可见。
 - 前置位置固定，不需要 marker 去重，也不需要管理同一 session 中的索引版本。
 - **Token 预算 600**。超了就按 `scope` 优先级 + `last_hit` 近度截断，并在末尾标注 `(N more, use memory_recall to search)`。索引无声地膨胀到几千 token 是这个设计最现实的退化路径。
@@ -542,9 +544,9 @@ score = bm25(query, title*3 + body + tags*2)
 
 **不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它**（§3.1 不变量）。两项都在 session 启动时构建索引快照时判定，写进 `.cache/`：第一项读 frontmatter，第二项查反向索引——那张表本来就要为 `because` 而建（§4.2.2），增量成本为零。打分函数只面对已经筛过的候选集，不重复判断。
 
-第二项不能省：GC 手动低频，`.cache/` 却每次 session 启动就按 mtime 重建（§6.1），省掉它，被取代的记忆会在 revise 之后、GC 之前这段可能长达几周的窗口里继续和继任者一起进入新 session 的召回候选（§3.3）。
+第二项不能省：GC 手动低频，`.cache/` 却在每次 session 启动时校验记忆源哈希并按需重建（§6.1），省掉它，被取代的记忆会在 revise 之后、GC 之前这段可能长达几周的窗口里继续和继任者一起进入新 session 的召回候选（§3.3）。
 
-用 `ids` 直接点名仍可读到，带 `superseded_by` 或有 `active` 继任者的会附上"已被 `<new-id>` 取代"。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
+用 `ids` 直接点名仍可读到，带 `superseded_by` 或有 `active` 继任者的会附上"已被 `<new-id>` 取代"。`.cache/` 里存倒排索引和 `source_hash`，纯 JSON，删了能重建。
 
 升级路径已经留好：打分函数是单一入口，加一路 embedding 召回再做 RRF 融合，是局部改动。**触发条件是 §10 的召回质量指标恶化，不是"因为向量更高级"。**
 

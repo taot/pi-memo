@@ -50,7 +50,7 @@
   <!-- ============ column B ============ -->
   <rect x="336" y="116" width="360" height="132" rx="6" fill="#fffaf3" stroke="#f0d9b5"/>
   <text x="352" y="139" font-size="13.5" font-weight="600" fill="#1f2328">索引注入器</text>
-  <text x="352" y="162" font-size="11.5" fill="#57606a">扫描 L1 + L2，渲染成一份统一索引</text>
+  <text x="352" y="162" font-size="11.5" fill="#57606a">扫描 L1 + L2，按源哈希校验缓存</text>
   <text x="352" y="183" font-size="11.5" fill="#57606a">session 启动时加载一次，保留固定快照</text>
   <text x="352" y="204" font-size="11.5" fill="#57606a">放在消息最前面，session 内不刷新</text>
   <rect x="352" y="215" width="240" height="21" rx="4" fill="#fdf0dd"/>
@@ -95,7 +95,7 @@
   <text x="780" y="377" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">MEMORY.md</text>
   <text x="880" y="377" font-size="11.5" fill="#57606a">索引，自动生成</text>
   <text x="780" y="397" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">.cache/</text>
-  <text x="880" y="397" font-size="11.5" fill="#57606a">倒排索引，gitignore</text>
+  <text x="880" y="397" font-size="11.5" fill="#57606a">倒排索引 + source_hash</text>
 
   <rect x="764" y="428" width="308" height="96" rx="6" fill="#f5fbf6" stroke="#c2e3cb"/>
   <text x="780" y="451" font-size="13.5" font-weight="600" fill="#1f2328">一文件 = 一条记忆 = 一个结论</text>
