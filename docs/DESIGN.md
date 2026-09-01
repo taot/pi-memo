@@ -95,7 +95,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 `archived` 的语义是"有人判断过这条不该再存在"。一旦机械规则能写它，这个语义即刻作废。也正因为它只由判断产生，才配当一个存储状态。
 
-**归档是不对称的，所以必须可复查。** 模型写错一条记忆，你迟早会读到并改掉；模型误归档一条好记忆，你收不到任何信号，只会觉得它"最近好像不太记得那件事了"——这是 §10 那个 silent failure 的另一副面孔。这里不加人工确认（会违背显式 tool call 路线，且 print / RPC 模式无法弹窗），改为保证出口：`archived_reason` 强制、文件永不删除、git 有记录，且 `/mneme-stats` 要列出最近归档的条目及其理由。
+**归档是不对称的，所以必须可复查。** 模型写错一条记忆，你迟早会读到并改掉；模型误归档一条好记忆，你收不到任何信号，只会觉得它"最近好像不太记得那件事了"——这是 §10 那个 silent failure 的另一副面孔。这里不加人工确认：它会违背显式 tool call 路线，且 print / JSON 模式没有对话能力，无法保证跨模式一致。改为保证出口：`archived_reason` 强制、文件永不删除、git 有记录，且 `/mneme-stats` 要列出最近归档的条目及其理由。
 
 ### 3.3 被取代：是关系，由 GC 物化成 `archived`
 
@@ -178,6 +178,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
   archive/                       #   已归档，GC 挪进来，不进索引不进检索
   MEMORY.md                      #   L1 索引
   .cache/                        #   派生索引，可重建
+  .local/usage.json              #   本机使用统计（hits / last_hit），gitignore
   .git/                          #   L1 自成一个本地仓库，见 §4.2.3
 
 <repo>/.pi/mneme/                # L2 项目内（随 repo 进 git）
@@ -186,6 +187,7 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
   archive/                       #   已归档，GC 挪进来
   MEMORY.md                      #   L2 索引
   .cache/                        #   gitignore
+  .local/usage.json              #   本机使用统计（hits / last_hit），gitignore
 ```
 
 ### 4.1.1 scope × kind 矩阵
@@ -240,8 +242,6 @@ id: wayland-no-window-positioning
 kind: env
 title: Wayland 不暴露窗口坐标设定，KDE 下 set_outer_position 静默失败
 created: 2026-08-31T14:22:07-04:00
-hits: 0
-last_hit: null
 status: active            # active | archived；只由 memory_forget / GC 写
 supersedes: null
 superseded_by: null       # 物化标记 + 归档来源判据，非真相，见 §3.3
@@ -264,8 +264,6 @@ id: e2e-window-positioning-via-kdotool
 kind: exp
 title: E2E 窗口定位走 kdotool，没选"断言不依赖绝对坐标"
 created: 2026-08-31T14:35:41-04:00
-hits: 0
-last_hit: null
 status: active
 supersedes: null
 because: [wayland-no-window-positioning]
@@ -352,23 +350,28 @@ verify:
 
 ### 4.2.4 时间戳
 
-一共三个时间戳，都是**带时区偏移的 ISO 8601 秒级值**，取你机器的本地时区：
+记忆 frontmatter 有两个时间戳，本机使用统计另有一个；三者都是**带时区偏移的 ISO 8601 秒级值**，取你机器的本地时区：
 
-| 字段 | 记的是 | 谁写 | 何时清空 |
-|---|---|---|---|
-| `created` | 这条知识写下来的时刻 | `memory_write` / `memory_revise` 建新条目时 | 永不 |
-| `last_hit` | 上次被 `memory_recall` 命中 | `agent_settled` 批量回写（§6.2） | 永不 |
-| `archived_at` | 置 `archived` 的时刻 | `memory_forget`、`/mneme-gc`（§3.1 转移表） | 随 `archived_reason` 一起，在复活时清掉 |
+| 字段 | 存放 | 记的是 | 谁写 | 何时清空 |
+|---|---|---|---|---|
+| `created` | frontmatter | 这条知识写下来的时刻 | `memory_write` / `memory_revise` 建新条目时 | 永不 |
+| `archived_at` | frontmatter | 置 `archived` 的时刻 | `memory_forget`、`/mneme-gc`（§3.1 转移表） | 随 `archived_reason` 一起，在复活时清掉 |
+| `last_hit` | `.local/usage.json` | 上次被 `memory_recall` 命中 | `agent_settled` 批量回写（§6.2） | 删除本机 usage 数据时 |
 
 ```yaml
 created: 2026-08-31T14:22:07-04:00
-last_hit: 2026-09-01T09:12:03-04:00
 archived_at: null
+```
+
+对应的本机使用统计单独保存，不进入 git：
+
+```json
+{"wayland-no-window-positioning":{"hits":3,"last_hit":"2026-09-01T09:12:03-04:00"}}
 ```
 
 **没有 `updated` 字段。** `memory_revise` 不覆盖（§5）——修订是新建一条带 `supersedes` 的条目，旧文件的正文一个字不动。所以在工具驱动的流程里，一条记忆的**内容自诞生起不可变**，`updated` 永远等于 `created`。
 
-会写旧文件的只有元数据：`hits` / `last_hit` 的记账、`superseded_by` 标记、`status` 与 `archived_reason`。让这些去 bump 一个叫 `updated` 的字段，它就不再表示"内容有多新"，而 §7 的 `recencyBoost` 恰恰要的是后者。最坏的组合是 GC 复活一条被取代的老记忆（§3.3）——那也是一次写入，`updated` 一跳，两年前的记忆在打分里瞬间变"新"，正好把 `recencyBoost` 要防的事情反过来做了一遍。
+会写旧文件的只有状态元数据：`superseded_by` 标记、`status` 与 `archived_reason`；`hits` / `last_hit` 已移到 `.local/usage.json`。让状态变更去 bump 一个叫 `updated` 的字段，它就不再表示"内容有多新"，而 §7 的 `recencyBoost` 恰恰要的是后者。最坏的组合是 GC 复活一条被取代的老记忆（§3.3）——那也是一次写入，`updated` 一跳，两年前的记忆在打分里瞬间变"新"，正好把 `recencyBoost` 要防的事情反过来做了一遍。
 
 剩下唯一真会改内容的是你手改文件，但没有工具能替你盖这个戳。而 git 已经完整记着每一次改动的时刻、diff 和 commit——这份设计在别处一路靠它（§3.5 删除可恢复、§4.2.3 让 L1 自己是个仓库）。`updated` 是这份记录的一个更差的副本：只有一个时刻，没有内容，还会被元数据写入污染。
 
@@ -417,7 +420,7 @@ Type.Object({
 })
 ```
 
-返回命中记忆的全文 + id + scope。副作用：`hits += 1`，`last_hit = now`（记账写回 frontmatter，见 §10）。
+返回命中记忆的全文 + id + scope。副作用：在对应 store 的 `.local/usage.json` 中记 `hits += 1`、`last_hit = now`（见 §6.2、§10）。
 
 ### `memory_write` — 形成
 
@@ -547,17 +550,17 @@ pi.on("context", async (event) => ({
 
 要点：
 - 新建、`resume`、`fork` 都会触发 `session_start` 并重新加载——记忆可能在别的 session 里改过。
-- 记忆源哈希的输入是按 `scope + 相对路径` 排序后的全部记忆文件，每项包含 scope、相对路径和文件字节。`.cache/` 保存 `source_hash`；只有哈希缺失或不一致时才重建。这会同时覆盖内容修改、新增、删除和重命名，不依赖文件时间戳。
+- 记忆源哈希的输入是按 `scope + 相对路径` 排序后的全部记忆文件，每项包含 scope、相对路径和文件字节；明确排除 MEMORY.md、GC-REPORT.md、`.cache/` 和 `.local/`。`.cache/` 保存 `source_hash`；只有哈希缺失或不一致时才重建。这会同时覆盖记忆内容修改、新增、删除和重命名，不依赖文件时间戳，usage 更新不会触发倒排索引重建。
 - 构建前检查 L1 与当前 L2 的 id 冲突。发现同名时不把这两个歧义条目放进索引或检索缓存，并在注入的索引消息里列出两个文件路径，要求你重命名其中一个；不静默选择某一层。`memory_write` / `memory_revise` 也在落盘前检查当前组合视图，拒绝制造冲突。无法预先扫描所有其他 repo；切换到发生冲突的 repo 时由这一步发现。
 - 索引是 **session 级快照**。同一 session 内的 write / revise / forget 只落盘，不刷新当前索引或 `.cache/`；下一个 session 再统一可见。
 - 前置位置固定，不需要 marker 去重，也不需要管理同一 session 中的索引版本。
-- **Token 预算 600**。超了就按 `scope` 优先级 + `last_hit` 近度截断，并在末尾标注 `(N more, use memory_recall to search)`。索引无声地膨胀到几千 token 是这个设计最现实的退化路径。
+- **Token 预算 600**。超了就按 `scope` 优先级 + `.local/usage.json` 中的 `last_hit` 近度截断；没有 usage 的视为从未命中。末尾标注 `(N more, use memory_recall to search)`。索引无声地膨胀到几千 token 是这个设计最现实的退化路径。
 
 不用 `resources_discover`：那个事件只接受 `skillPaths` / `promptPaths` / `themePaths`，不是通用注入点。
 
 ### 6.2 `agent_settled` — 只做记账
 
-把 `memory_recall` 累积的 hit 计数批量写回 frontmatter。**不做任何自动蒸馏或整理**——这是你选的边界，我在这里守住它。
+把 `memory_recall` 累积的 hit 增量按 store 批量合并进 `.local/usage.json`，更新 `hits` / `last_hit`。`.local/` 在 L1 和 L2 都 gitignore；它不是可由记忆内容重建的缓存，删除只会把本机使用统计归零，不影响记忆、索引或关系正确性。**不做任何自动蒸馏或整理**——这是你选的边界，我在这里守住它。
 
 ### 6.3 并发边界
 
@@ -591,7 +594,7 @@ score = bm25(query, title*3 + body + tags*2)
       * kindBoost          // 显式指定 kind 时非匹配项 *0.6（软偏好，不是过滤）
       * scopeBoost         // project 1.0, global 0.9（当前 repo 的知识优先）
       * recencyBoost       // 1 + 0.2 * exp(-age_days / 90)，age 自 created 起算（§4.2.4）
-      * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
+      * hitBoost           // 1 + 0.1 * log(1 + hits)，hits 来自 .local/usage.json
 ```
 
 **不进检索 ⟺ `status: archived` ∨ 存在一条 `active` 记忆 `supersedes` 它**（§3.1 不变量）。两项都在 session 启动时构建索引快照时判定，写进 `.cache/`：第一项读 frontmatter，第二项查反向索引——那张表本来就要为 `because` 而建（§4.2.2），增量成本为零。打分函数只面对已经筛过的候选集，不重复判断。
@@ -628,7 +631,7 @@ score = bm25(query, title*3 + body + tags*2)
 1. **陈旧**：`env` 的 `verify` 失败（§4.2.1）。按成本分层：`file` / `command` 的 `expect` 匹配 + `url` 的 HTTP 状态默认跑；`url` 内容判断由 `--check-urls` 控制（§8.1）。报告里把记忆正文和实际结果并排放。
 2. **受牵连**：上一组每条待核 `env`，顺 `because:` 反向索引找出依赖它的 `exp`（§4.2.2），沿链传递——"这条选择的前提可能已经变了"。这是 `env` / `exp` 拆开的完整收益：`env` 能自动查陈旧，`exp` 靠依赖关系被带出来，两者都不会静静地烂掉。
 3. **疑似重复**：正文高度相似的对，建议 `memory_revise` 合并。
-4. **久未命中**：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）。报告里要写明：低频不等于无用，长尾记忆往往正是关键的那条。
+4. **久未命中**：`.local/usage.json` 中没有记录或 `hits == 0`，且 age > 90d（论文 §5.2.3 的 time + frequency 信号）。报告里要写明：本机 usage 被删除也会让条目看起来从未命中；低频不等于无用，长尾记忆往往正是关键的那条。
 
 **B 组只扫 `active` 条目。** 这不是省事，是正确性：被取代的条目已退出检索，`hits` 从此不可能再涨，留在扫描范围里就会在 90 天后必然落入第 4 组——一条"按设计不可能再命中"的记忆被当成"久未命中"摆到你面前，你一勾选，前任就被真正归档了，继任者哪天消失也再没人顶上（§3.3）。物化 `status` 顺带把这个坑填了：它们已经是 `archived`，天然在扫描范围之外。归档复查不属于 GC 报告，由 `/mneme-stats` 单独负责（§10）。
 5. **待补**：缺 `verify:` 的 `env` 条目、`supersedes` 指向不存在 id 的条目。
@@ -658,11 +661,11 @@ score = bm25(query, title*3 + body + tags*2)
                                           [ 检查 ]  [ 跳过 ]
 ```
 
-用 `ctx.ui.confirm()`（pi 为 interactive / RPC / print 各模式分别提供了实现）。
+有对话能力时用 `ctx.ui.confirm()`：TUI 直接显示确认框，RPC 通过 extension UI 子协议发送确认请求。是否可对话以 `ctx.hasUI` 为准。
 
 两条边界：
 
-- **无法弹窗时（print 模式、无人值守）默认 `false`。** 花钱的操作在没人能回答的场合一律不做。此时在输出里写明"已跳过 N 条 url 检查，用 `--check-urls=true` 启用"，让跳过这件事仍然可见。
+- **`ctx.hasUI === false` 时（print / JSON 模式）默认 `false`。** 花钱的操作在没人能回答的场合一律不做。此时在输出里写明"已跳过 N 条 url 检查，用 `--check-urls=true` 启用"，让跳过这件事仍然可见。
 - **不记忆你的选择。** `/mneme-gc` 是手动、低频的操作，每次问一遍的成本远低于"上次选了跳过，这次也静默跳过"带来的意外。
 
 **长尾风险**：论文 §5.2.3 明确警告 LRU 类策略"may eliminate long-tail knowledge, which is seldom accessed but essential for correct decision-making"。一条一年只用一次但每次都救命的记忆，恰恰是最有价值的。所以 GC 只提候选、由你定夺，且归档不删文件。
@@ -678,6 +681,7 @@ pi-mneme/
     store/
       paths.ts          # 三层作用域解析
       entry.ts          # frontmatter 读写、id 校验
+      usage.ts          # .local/usage.json 读写与合并
       index-file.ts     # MEMORY.md 渲染
     retrieval/
       tokenize.ts         # nodejieba + 代码标识符分词

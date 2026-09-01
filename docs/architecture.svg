@@ -66,7 +66,7 @@
 
   <rect x="336" y="428" width="360" height="56" rx="6" fill="#fffaf3" stroke="#f0d9b5"/>
   <text x="352" y="451" font-size="13.5" font-weight="600" fill="#1f2328">记账</text>
-  <text x="352" y="470" font-size="11.5" fill="#57606a">hits / last_hit 批量写回 frontmatter，不做任何蒸馏</text>
+  <text x="352" y="470" font-size="11.5" fill="#57606a">hits / last_hit 写入 .local/usage.json，不做任何蒸馏</text>
 
   <rect x="336" y="508" width="360" height="60" rx="6" fill="#faf8ff" stroke="#ddd6f3"/>
   <text x="352" y="531" font-size="13.5" font-weight="600" fill="#1f2328">GC 与统计</text>
@@ -94,12 +94,12 @@
   <text x="880" y="357" font-size="11.5" fill="#57606a">本项目踩坑与结论</text>
   <text x="780" y="377" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">MEMORY.md</text>
   <text x="880" y="377" font-size="11.5" fill="#57606a">索引，自动生成</text>
-  <text x="780" y="397" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">.cache/</text>
-  <text x="880" y="397" font-size="11.5" fill="#57606a">倒排索引 + source_hash</text>
+  <text x="780" y="397" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1f2328">.cache/ · .local/</text>
+  <text x="910" y="397" font-size="11.5" fill="#57606a">索引 · 本机统计</text>
 
   <rect x="764" y="428" width="308" height="96" rx="6" fill="#f5fbf6" stroke="#c2e3cb"/>
   <text x="780" y="451" font-size="13.5" font-weight="600" fill="#1f2328">一文件 = 一条记忆 = 一个结论</text>
-  <text x="780" y="473" font-size="11.5" fill="#57606a">frontmatter: id · kind · title · hits · last_hit</text>
+  <text x="780" y="473" font-size="11.5" fill="#57606a">frontmatter: id · kind · title · created · status</text>
   <text x="780" y="494" font-size="11.5" fill="#57606a">正文 ~200 字；exp 必须写"下次怎么办"</text>
   <text x="780" y="515" font-size="11.5" fill="#57606a">正文内 [[id]] 是软链接，指向空 id 也合法</text>
 
