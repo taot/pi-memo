@@ -49,12 +49,15 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
   user/*.md                      #   user factual：你的偏好、习惯、长期承诺
   env/*.md                       #   全局 environment factual：语言/库/平台的事实
   exp/*.md                       #   跨项目经验：与具体 repo 无关的通用结论
+  archive/                       #   已归档，GC 挪进来，不进索引不进检索
   MEMORY.md                      #   L1 索引
   .cache/                        #   派生索引，可重建
+  .git/                          #   L1 自成一个本地仓库，见 §3.2.3
 
 <repo>/.pi/mneme/                # L2 项目内（随 repo 进 git）
   env/*.md                       #   项目 environment factual：架构、约定、构建命令、环境怪癖
   exp/*.md                       #   本项目经验：踩坑与结论
+  archive/                       #   已归档，GC 挪进来
   MEMORY.md                      #   L2 索引
   .cache/                        #   gitignore
 ```
@@ -112,7 +115,7 @@ created: 2026-08-31
 updated: 2026-08-31
 hits: 0
 last_hit: null
-status: active            # active | superseded | archived
+status: active            # active | archived
 supersedes: null
 verify:
   kind: url
@@ -138,6 +141,7 @@ hits: 0
 last_hit: null
 status: active
 supersedes: null
+because: [wayland-no-window-positioning]
 tags: [e2e, screenshot, kdotool]
 ---
 
@@ -154,7 +158,8 @@ tags: [e2e, screenshot, kdotool]
 - `exp` 应写出**没选的那个方案**。少了它，将来条件变化时你无法判断这个选择还成不成立。
 - `env` 应有 `verify:`，见 §3.2.1。写不出 `verify` 的，多半不是 `env`。
 - `id` 即文件名（不含 `.md`），kebab-case，全局唯一。
-- `[[id]]` 是软链接，指向不存在的 id 不是错误——它标记了一条还没写的记忆。
+- 两种引用，语义不同，不要混用，见 §3.2.2。
+- `status` 只有两态，见 §3.2.3。"被取代"不是状态，是关系。
 
 ### 3.2.1 `verify` 字段
 
@@ -189,6 +194,52 @@ verify:
 
 **为什么没有单独的"来源"字段**：来源和核实方法多数时候是同一个东西，分成两个字段必然漂移。两者确实分叉时（例：某个 panic 是线上崩了才知道的，但核实要查文档），存**核实方法**——记忆系统的失败模式是陈旧而不是溯源，"当时为什么信"帮不上 GC 的忙。
 
+### 3.2.2 `because:` 与 `[[id]]`
+
+记忆之间有两种关系，只有一种需要结构化。
+
+| | 语义 | 方向 | 可指向空 id | 参与陈旧传播 |
+|---|---|---|---|---|
+| `[[id]]`（写在正文里） | 相关，值得一起看 | 无 | 合法，标记一条还没写的记忆 | 否 |
+| `because:`（写在 frontmatter） | **我的前提** | 有 | 非法，写入时校验 | 是 |
+
+`because:` 存在的唯一理由是**陈旧传播**：`verify` 把一条 `env` 判为待核之后（§3.2.1），建立在它之上的 `exp` 同样可疑——那个选择的全部理由可能已经不成立了。GC 顺着反向索引把这些 `exp` 一并列出（§7 步骤 2）。没有这个字段，拆分 `env` / `exp` 只换来一个能自动查陈旧的 `env`，而依赖它的判断仍然静静地烂在那里。
+
+多数 `because:` 指向 `env`。指向另一条 `exp` 也合法（一个选择建立在更早的选择之上），形成链，陈旧沿链传递。
+
+反向也要用：`memory_forget` 一条仍被依赖的记忆时，先列出依赖方再让模型确认，不静默孤立它们。
+
+### 3.2.3 `status` 与"被取代"
+
+`status` 只有两态：
+
+| | 含义 | 谁写 |
+|---|---|---|
+| `active` | 在用，进索引，可召回 | 默认 |
+| `archived` | 有人明确决定不要了 | `memory_forget`，附 `archived_reason` |
+
+**"被取代"不是状态，是关系**，由 `supersedes` 的反向索引推导：存在另一条 `active` 记忆 `supersedes: X`，则 X 自动退休——退出索引与检索，但文件仍在，`memory_recall` 用 `ids` 直接点名仍可读到（附带"已被 Y 取代"）。
+
+之所以不设 `superseded` 状态，是因为那会把同一个事实存两遍，且失败模式很隐蔽：
+
+> 你 `git revert` 掉了那条新记忆，旧条目上的 `status: superseded` 还在。旧记忆退出了索引和检索，却没有任何继任者——这条知识静默消失了，GC 也发现不了，因为它的状态"合法"。
+
+推导则不会：新条目没了，反向索引里就没人取代它，旧条目自动回到 `active`。反向索引本来就要为 `because` 而建（§3.2.2），增量成本为零。
+
+这与 `because` 是同一条原则：**关系写成结构化字段并单向存储，状态只描述有人主动做过的决定。**
+
+**物理布局：status 是真相，目录是 GC 维护的物化视图。**
+
+`memory_forget` 只翻 `status`，不动文件位置——快、可逆、不在会话中途制造路径变更。`/mneme-gc` 本来就要重建索引与缓存，顺手把 `status: archived` 的文件 `git mv` 进 `archive/`（保留 `env/` `exp/` 子结构）。
+
+之所以不让 forget 当场移动：那样"这条记忆是否还在用"就同时由目录和 status 表示，两个真相源会打架——你手改 frontmatter 把 status 改回 `active`，文件却还躺在 `archive/` 里。因为 GC 是唯一动布局的地方，每次跑完两者按构造一致；跑之间以 status 为准。被 `supersedes` 自动退休的条目**不移动**，它随时可能因为继任者消失而复活（见上），移动会让这个推导失去意义。
+
+**永不自动删除，两层都要有 git。**
+
+`archive/` 只增不减。真要删是 `git rm`，你的决定。但这要求存储处在版本控制下——L2 随 repo 天然满足，**L1 不满足**，所以 `~/.pi/mneme/` 自己初始化成一个本地仓库，`/mneme-gc` 结束时提交一次（从不 push）。否则"删除可恢复"这个前提在全局层是空的，而 L1 装的恰恰是最难重建的东西：你的偏好和跨项目经验。附带收益是记忆演化有完整审计轨迹，对应论文 §7.7 把可审计列为可信记忆的支柱。
+
+体量不是问题：一条记忆约 1 KB，一年归档几百条也就几百 KB。归档的真实成本是 `grep` 时的噪声，而这正是挪进 `archive/` 要解决的。
+
 ### 3.3 索引 MEMORY.md
 
 自动生成，不手改（手改会被 `/mneme-gc` 覆盖）：
@@ -199,9 +250,10 @@ verify:
 ## env
 - [build-and-check](env/build-and-check.md) — 改代码后跑 `npm run check`，不要跑 `npm test`
 - [session-file-format](env/session-file-format.md) — session 是 JSONL，每行一个 entry
+- [wayland-no-window-positioning](env/wayland-no-window-positioning.md) — Wayland 不暴露窗口坐标设定，KDE 下 set_outer_position 静默失败
 
 ## exp
-- [kde-wayland-window-positioning](exp/kde-wayland-window-positioning.md) — KDE Wayland 下程序设定窗口位置会静默失败
+- [e2e-window-positioning-via-kdotool](exp/e2e-window-positioning-via-kdotool.md) — E2E 窗口定位走 kdotool，没选"断言不依赖绝对坐标"
 ```
 
 每条一行：id + 一句钩子（取自 title）。**索引是唯一常驻进 context 的东西**，预算见 §5.1。
@@ -251,8 +303,13 @@ Type.Object({
     ref: Type.String({ description: "Repo-relative path (no line number), a read-only command, or a doc URL." }),
     expect: Type.String({ description: "Substring that must still be found in the file or command output." }),
   }, { description: "kind=env only. How to confirm this is still true. See §3.2.1." })),
+  because: Type.Optional(Type.Array(Type.String(), {
+    description:
+      "ids this memory rests on as premises. Mostly env ids under an exp. " +
+      "Every id must already exist — this is a dependency, not a soft link. See §3.2.2.",
+  })),
   tags: Type.Optional(Type.Array(Type.String())),
-  links: Type.Optional(Type.Array(Type.String(), { description: "ids of related memories" })),
+  links: Type.Optional(Type.Array(Type.String(), { description: "ids of merely related memories (soft, may dangle)" })),
 })
 ```
 
@@ -268,7 +325,7 @@ Type.Object({
 })
 ```
 
-**不覆盖**：旧文件 `status: superseded`，新文件带新 id 且 `supersedes: <old-id>`。旧文件退出索引但留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件不改状态——它由反向索引自动退休（§3.2.3），文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
 
 ### `memory_forget` — 遗忘
 
@@ -279,7 +336,11 @@ Type.Object({
 })
 ```
 
-只置 `status: archived` 并移出索引。永不删文件——真要删，用 `git rm`，那是你的决定。
+置 `status: archived`，把 `reason` 写进 `archived_reason`，移出索引。**不移动文件**——物理归档由 `/mneme-gc` 统一做（§3.2.3）。永不删文件。
+
+`reason` 必须落盘。不写下来它就只是一次性的 tool call 参数，将来你看到一条被归档的记忆，只能去翻 git log 才知道当初为什么。
+
+若这条记忆仍被别的记忆 `because:` 依赖（§3.2.2），先返回依赖方列表而不执行，让模型确认或改去处理依赖方。不静默把依赖悬空。
 
 ### 工具描述里要写进去的引导
 
@@ -334,7 +395,7 @@ score = bm25(query, title*3 + body + tags*2)
       * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
 ```
 
-`status != active` 的条目不进检索。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
+`status: archived` 以及被反向索引判定已退休的条目（§3.2.3）不进检索；用 `ids` 直接点名仍可读到。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
 
 升级路径已经留好：打分函数是单一入口，加一路 embedding 召回再做 RRF 融合，是局部改动。**触发条件是 §9 的召回质量指标恶化，不是"因为向量更高级"。**
 
@@ -344,10 +405,11 @@ score = bm25(query, title*3 + body + tags*2)
 
 `/mneme-gc` 是唯一的批量整理入口，由你手动触发：
 
-1. 列出候选：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）、正文高度相似的对、指向不存在 id 的 `[[链接]]`、`status != active` 但仍在索引里的条目、缺 `verify:` 的 `env` 条目。
-2. **`env` 陈旧检查**（§3.2.1），按成本分层：`file` / `command` 的 `expect` 匹配 + `url` 的 HTTP 状态默认跑，匹配不上就标为待核，把记忆正文和实际结果并排给你看；`url` 的内容判断由 `--check-urls` 控制，见下，且结论一律只是"待核"。这是 `env` / `exp` 分开的直接收益——`exp` 是取舍，没有客观的"还成不成立"可查，只能靠你。
-3. 逐条问你：保留 / 归档 / 合并 / 改用 `memory_revise`。
-4. 重建 MEMORY.md 和 `.cache/`。
+1. 列出候选：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）、正文高度相似的对、指向不存在 id 的 `[[链接]]`、`status: archived` 但仍在索引里的条目、`supersedes` 指向不存在 id 的条目、缺 `verify:` 的 `env` 条目。
+2. **`env` 陈旧检查**（§3.2.1），按成本分层：`file` / `command` 的 `expect` 匹配 + `url` 的 HTTP 状态默认跑，匹配不上就标为待核，把记忆正文和实际结果并排给你看；`url` 的内容判断由 `--check-urls` 控制，见 §7.1，且结论一律只是"待核"。
+3. **陈旧传播**（§3.2.2）：上一步标为待核的每条 `env`，顺 `because:` 反向索引找出依赖它的 `exp`，一并列出——"这条选择的前提可能已经变了"。沿链传递。这是 `env` / `exp` 拆开的完整收益：`env` 可自动查陈旧，`exp` 靠依赖关系被带出来，两者都不会静静地烂掉。
+4. 逐条问你：保留 / 归档 / 合并 / 改用 `memory_revise`。
+5. 重建 MEMORY.md 和 `.cache/`，把 `status: archived` 的文件 `git mv` 进 `archive/`（§3.2.3），并在 L1 提交一次。
 
 不自动跑。论文 §7.8 提倡的离线 consolidation（"睡眠"）能力更强，但它会花你没预算的 token 并改你没看过的文件——留到 M3 作为 opt-in。
 
@@ -406,10 +468,12 @@ pi-mneme/
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0** | store 层 + `memory_write` / `memory_recall` + 索引注入 | 手动写 5 条记忆，新会话里模型能召回正确的那条 |
+| **M0** | store 层（frontmatter 全字段，含 `verify` / `because`）+ `memory_write` / `memory_recall` + 索引注入 | 手动写 5 条记忆，新会话里模型能召回正确的那条 |
 | **M1** | `memory_revise` / `memory_forget` + BM25 打分 + `.cache/` | 迁移 `pi-dioxus/docs/memory/` 全部内容 |
 | **M2** | `/mneme-gc` + `/mneme-stats`（§9 指标） | 连用两周，看指标 |
 | **M3**（可选，看 M2 数据） | 向量召回；离线 consolidation；working memory（`session_before_compact`） | —— |
+
+**`verify` 和 `because` 从 M0 就要写入，尽管消费它们的逻辑要到 M2 才有。** 这两个字段记的是写入当下才知道的信息——当时靠什么核实、这个选择建立在什么前提上。M0/M1 期间攒下的记忆如果缺了它们，事后无法重建，M2 的陈旧检查和传播也就无从跑起。字段先行、逻辑后补，代价只是几行 frontmatter。
 
 ---
 
