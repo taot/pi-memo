@@ -199,6 +199,8 @@ GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `mem
 
 唯一的非法组合是 `project` × `user`：关于你的事实永远属于 L1，永远不进 repo。工具层校验并给出明确报错，不静默改写。
 
+作用域同时约束强依赖：`scope: global` 的 `because` 只能引用 L1 global 条目；`scope: project` 可以引用 L1 global 或当前项目 L2。否则一条 global 记忆切换 repo 后仍会加载，它依赖的项目前提却已经消失，与 global 的定义矛盾。`[[id]]` 和 `links` 是允许悬空的软关系，不受这条限制。
+
 ### 4.1.2 `env` 和 `exp` 怎么分
 
 判据只有一条，且必须是可当场执行的：
@@ -283,7 +285,7 @@ tags: [e2e, screenshot, kdotool]
 - `exp` 应写出**没选的那个方案**。少了它，将来条件变化时你无法判断这个选择还成不成立。
 - `env` 应有 `verify:`，见 §4.2.1。写不出 `verify` 的，多半不是 `env`。
 - 时间戳一律是带时区偏移的 ISO 8601 秒级值（`2026-08-31T14:22:07-04:00`），取**你的本地时区**，不转 UTC。**没有 `updated` 字段**，理由见 §4.2.4。
-- `id` 即文件名（不含 `.md`），kebab-case，全局唯一。
+- `id` 即文件名（不含 `.md`），kebab-case，在 L1 + 当前 L2 的组合视图中唯一。
 - 两种引用，语义不同，不要混用，见 §4.2.2。
 - `status` 只有两态。"被取代"不是第三态，而是一条由 GC 双向物化到 `archived` 的关系，见 §3.3。
 
@@ -332,6 +334,8 @@ verify:
 `because:` 存在的唯一理由是**陈旧传播**：`verify` 把一条 `env` 判为待核之后（§4.2.1），建立在它之上的 `exp` 同样可疑——那个选择的全部理由可能已经不成立了。GC 顺着反向索引把这些 `exp` 一并列出（§8 报告第 2 组）。没有这个字段，拆分 `env` / `exp` 只换来一个能自动查陈旧的 `env`，而依赖它的判断仍然静静地烂在那里。
 
 多数 `because:` 指向 `env`。指向另一条 `exp` 也合法（一个选择建立在更早的选择之上），形成链，陈旧沿链传递。
+
+写入和 revise 时按作用域校验：global 条目的每个前提必须在 L1；project 条目的前提可以在 L1 或当前 L2。校验的是 `scope + id` 解析后的实际条目，不允许靠同名碰巧解析成功。
 
 反向也要用：`memory_forget` 一条仍被依赖的记忆时，先列出依赖方再让模型确认，不静默孤立它们。
 
@@ -442,7 +446,9 @@ Type.Object({
   because: Type.Optional(Type.Array(Type.String(), {
     description:
       "ids this memory rests on as premises. Mostly env ids under an exp. " +
-      "Every id must already exist — this is a dependency, not a soft link. See §4.2.2.",
+      "Every id must already exist. A global memory may depend only on global ids; " +
+      "a project memory may depend on global or current-project ids. " +
+      "This is a dependency, not a soft link. See §4.2.2.",
   })),
   tags: Type.Optional(Type.Array(Type.String())),
   links: Type.Optional(Type.Array(Type.String(), { description: "ids of merely related memories (soft, may dangle)" })),
@@ -542,6 +548,7 @@ pi.on("context", async (event) => ({
 要点：
 - 新建、`resume`、`fork` 都会触发 `session_start` 并重新加载——记忆可能在别的 session 里改过。
 - 记忆源哈希的输入是按 `scope + 相对路径` 排序后的全部记忆文件，每项包含 scope、相对路径和文件字节。`.cache/` 保存 `source_hash`；只有哈希缺失或不一致时才重建。这会同时覆盖内容修改、新增、删除和重命名，不依赖文件时间戳。
+- 构建前检查 L1 与当前 L2 的 id 冲突。发现同名时不把这两个歧义条目放进索引或检索缓存，并在注入的索引消息里列出两个文件路径，要求你重命名其中一个；不静默选择某一层。`memory_write` / `memory_revise` 也在落盘前检查当前组合视图，拒绝制造冲突。无法预先扫描所有其他 repo；切换到发生冲突的 repo 时由这一步发现。
 - 索引是 **session 级快照**。同一 session 内的 write / revise / forget 只落盘，不刷新当前索引或 `.cache/`；下一个 session 再统一可见。
 - 前置位置固定，不需要 marker 去重，也不需要管理同一 session 中的索引版本。
 - **Token 预算 600**。超了就按 `scope` 优先级 + `last_hit` 近度截断，并在末尾标注 `(N more, use memory_recall to search)`。索引无声地膨胀到几千 token 是这个设计最现实的退化路径。
