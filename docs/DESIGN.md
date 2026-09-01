@@ -4,6 +4,8 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 设计参照 Hu et al., *Memory in the Age of AI Agents: A Survey* (arXiv 2512.13564v2)，下称"论文"。
 
+![pi-mneme 架构](architecture.svg)
+
 ---
 
 ## 1. 范围
@@ -43,25 +45,41 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 ### 3.1 三层作用域
 
 ```
-~/.pi/mneme/                     # L1 全局
+~/.pi/mneme/                     # L1 全局（永不进 repo）
   user/*.md                      #   user factual：你的偏好、习惯、长期承诺
+  env/*.md                       #   全局 environment factual：语言/库/平台的事实
   exp/*.md                       #   跨项目经验：与具体 repo 无关的通用结论
   MEMORY.md                      #   L1 索引
   .cache/                        #   派生索引，可重建
 
 <repo>/.pi/mneme/                # L2 项目内（随 repo 进 git）
-  env/*.md                       #   environment factual：架构、约定、构建命令、环境怪癖
+  env/*.md                       #   项目 environment factual：架构、约定、构建命令、环境怪癖
   exp/*.md                       #   本项目经验：踩坑与结论
   MEMORY.md                      #   L2 索引
   .cache/                        #   gitignore
 ```
 
-三层指 **L1-user / L1-exp / L2**。写入时必须选 scope，`memory_write` 的 `scope` 参数无默认值——强制模型做一次显式判断，避免所有东西都堆进项目层。
+### 3.1.1 scope × kind 矩阵
+
+`scope` 回答"换个 repo 还成立吗"，`kind` 回答"这是什么性质的知识"。两者正交：
+
+| | `kind: user` | `kind: env`（事实） | `kind: exp`（经验） |
+|---|---|---|---|
+| **`scope: global`**（L1） | 你的偏好与承诺 | 语言/库/平台的事实 | 跨项目的通用结论 |
+| **`scope: project`**（L2） | — | 本 repo 的架构与约定 | 本 repo 的踩坑 |
+
+唯一的非法组合是 `project` × `user`：关于你的事实永远属于 L1，永远不进 repo。工具层校验并给出明确报错，不静默改写。
 
 判断规则写进 tool description：
-- 关于**你**的 → `user`
-- 换个 repo 仍然成立 → `global`（例：*tokio 的 `block_in_place` 在 current_thread runtime 上会 panic*）
-- 只在这个 repo 成立 → `project`（例：*本项目 E2E 必须用 `PI_DIOXUS_AGENT_BIN` 指向 stub，否则要真 API key*）
+- `env` vs `exp`：**这个世界本来就是这样** → `env`；**我们试过才知道，下次要换个做法** → `exp`
+- `global` vs `project`：换个 repo 仍然成立 → `global`
+
+三个例子，正好覆盖三种典型：
+- `global` × `env` — *tokio 的 `block_in_place` 在 current_thread runtime 上会 panic*（库的属性，不是我们的经验）
+- `project` × `env` — *本项目 E2E 必须用 `PI_DIOXUS_AGENT_BIN` 指向 stub，否则要真 API key*
+- `project` × `exp` — *KDE Wayland 下程序设定窗口位置会静默失败，改用 kdotool*
+
+**为什么 `env` 和 `exp` 必须分开**：`exp` 强制要求"下次怎么办"这一段（§3.2）。一条纯事实写不出这段，硬凑只会污染记忆质量。这条约束是 `env`/`exp` 分类的实际判据——写不出行动项，说明它是 `env`。
 
 `pi-dioxus/docs/memory/` 里已有的手写笔记正好是 L2 `env/` 的内容，迁移即可。
 
@@ -138,8 +156,15 @@ Type.Object({
 
 ```typescript
 Type.Object({
-  scope: Type.Union([Type.Literal("user"), Type.Literal("global"), Type.Literal("project")]),
-  kind: Type.Union([Type.Literal("user"), Type.Literal("env"), Type.Literal("exp")]),
+  scope: Type.Union([Type.Literal("global"), Type.Literal("project")], {
+    description: "global = still true in another repo. project = only true here.",
+  }),
+  kind: Type.Union([Type.Literal("user"), Type.Literal("env"), Type.Literal("exp")], {
+    description:
+      "user = a fact about the person you work with (forces scope=global). " +
+      "env = how the world already is (a library, a platform, this repo's layout). " +
+      "exp = what we learned by trying, and what to do differently next time.",
+  }),
   id: Type.String({ description: "kebab-case, unique. e.g. tokio-block-in-place-panics" }),
   title: Type.String({ description: "One line. This is what shows up in the index — make it a claim, not a topic." }),
   body: Type.String({ description: "The memory. For kind=exp, must end with what to do next time." }),
@@ -221,7 +246,7 @@ v1 不引入 embedding，理由是三层记忆的规模在几百条量级，且�
 ```
 score = bm25(query, title*3 + body + tags*2)
       * kindBoost          // 显式指定 kind 时非匹配项 *0.3
-      * scopeBoost         // project 1.0, global 0.9, user 0.85（当前 repo 的知识优先）
+      * scopeBoost         // project 1.0, global 0.9（当前 repo 的知识优先）
       * recencyBoost       // 1 + 0.2 * exp(-age_days / 90)
       * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
 ```
