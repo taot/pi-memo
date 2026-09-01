@@ -77,7 +77,7 @@ updated: 2026-08-31T14:22:07-04:00
 verify:
   kind: url
   ref: https://wayland.freedesktop.org/docs/html/
-  expect: xdg-shell 中没有窗口定位请求
+  expect: xdg-shell has no window positioning request
 tags: [kde, wayland, winit]
 ---
 
@@ -105,11 +105,11 @@ verify:
 
 | `kind` | `ref` | 检查方式 |
 |---|---|---|
-| `file` | repo 内相对路径 | 文件内容包含 `expect` |
+| `file` | 文件路径；project 使用 repo 内相对路径 | 文件内容包含 `expect` |
 | `command` | 一条只读命令 | 命令输出包含 `expect` |
 | `url` | 文档 URL | 默认检查 HTTP 状态；显式启用时再检查页面内容 |
 
-`ref` 不带行号，`expect` 不能为空。`command` 在写入时由模型确认是只读命令。
+`ref` 不带行号，`expect` 不能为空。`command` 在写入时由模型确认是只读命令。global `env` 的 `file` 不得引用项目内文件，这一约束由模型在写入前尽量保证。
 
 ### 4.3 索引
 
@@ -126,26 +126,30 @@ verify:
 - [e2e-window-positioning-via-kdotool](exp/e2e-window-positioning-via-kdotool.md) — E2E 窗口定位使用 kdotool
 ```
 
-每行只包含 id 和 title。索引由 `/mneme-gc` 或 session 启动时重建，不手工编辑。
+每行只包含 id 和 title。索引由 `/mneme-gc` 或 session 启动时重建；`memory_write`、`memory_revise` 和 `memory_forget` 也会在操作成功后立即更新索引。索引不手工编辑。
 
 ## 5. 工具
 
 ### 5.1 `memory_recall`
 
 ```typescript
-Type.Object({
-  query: Type.String(),
-  ids: Type.Optional(Type.Array(Type.String())),
-  kind: Type.Optional(Type.Union([
-    Type.Literal("user"),
-    Type.Literal("env"),
-    Type.Literal("exp"),
-  ])),
-  limit: Type.Optional(Type.Integer({ default: 5, maximum: 15 })),
-})
+Type.Union([
+  Type.Object({
+    query: Type.String(),
+    kind: Type.Optional(Type.Union([
+      Type.Literal("user"),
+      Type.Literal("env"),
+      Type.Literal("exp"),
+    ])),
+    limit: Type.Optional(Type.Integer({ default: 5, maximum: 15 })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ids: Type.Array(Type.String()),
+  }, { additionalProperties: false }),
+])
 ```
 
-按 query 检索，或用 ids 直接读取指定条目。返回全文、id 和 scope。命中的条目累计 `hits` 并更新 `last_hit`。
+`query` 和 `ids` 必须提供一个，且只能提供一个。按 query 检索，或用 ids 直接读取指定条目。返回全文、id 和 scope。命中的条目累计 `hits` 并更新 `last_hit`。
 
 ### 5.2 `memory_write`
 
@@ -173,7 +177,7 @@ Type.Object({
 })
 ```
 
-写入前按 id 和 title 查重。id 已存在时拒绝写入；标题高度相似时返回候选条目，让模型决定是否改用 `memory_revise`。
+写入前按 id 和 title 查重。id 已存在时拒绝写入；标题高度相似时返回候选条目，让模型决定是否改用 `memory_revise`。写入成功后立即更新索引和检索缓存。
 
 ### 5.3 `memory_revise`
 
@@ -198,7 +202,7 @@ Type.Object({
 })
 ```
 
-直接更新原文件，保留 `id`、`scope`、`kind` 和 `created`，并把 `updated` 设为当前时间。省略字段表示保持不变，`null` 表示清空可选字段。
+直接更新原文件，保留 `id`、`scope`、`kind` 和 `created`，并把 `updated` 设为当前时间。省略字段表示保持不变，`null` 表示清空可选字段。更新成功后立即更新索引和检索缓存。
 
 ### 5.4 `memory_forget`
 
@@ -208,7 +212,7 @@ Type.Object({
 })
 ```
 
-直接删除对应的记忆文件，并从索引和检索缓存中移除。
+直接删除对应的记忆文件，并立即从索引和检索缓存中移除。
 
 ### 5.5 工具引导
 
@@ -241,7 +245,7 @@ pi.on("context", async (event) => ({
 
 索引最多注入 50 条或约 2000 token，先到者为准。超出时优先项目条目，再按 `last_hit` 从近到远排序；末尾提示剩余数量，并引导使用 `memory_recall` 搜索。
 
-同一 session 中的写入、更新和删除立即落盘，但索引快照在下一个 session 才刷新。
+同一 session 中的写入、更新和删除会立即落盘，并同步更新 `MEMORY.md` 和检索缓存；后续的 `memory_recall` 立即看到变更。已注入上下文的 session 索引快照保持不变，到下一个 session 才刷新。
 
 ### 6.2 使用统计
 
@@ -309,7 +313,6 @@ URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面�
 
 - 总条目数，按 scope 和 kind 分组。
 - `hits == 0` 的条目数量和占比。
-- 每周新增与更新数量。
 - 当前索引条目数、token 数和上限。
 
 ## 10. 代码结构与阶段
@@ -341,8 +344,8 @@ pi-mneme/
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| M0 | store、`memory_write`、`memory_recall`、索引注入 | 新会话能召回已写入的记忆 |
-| M1 | `memory_revise`、`memory_forget`、BM25、缓存 | 更新和删除立即落盘，新会话检索结果正确 |
+| M0 | store、`memory_write`、按 ids 召回的 `memory_recall`、索引注入 | 新会话能从索引取得 id，并按 ids 召回已写入的记忆 |
+| M1 | 按 query 检索的 `memory_recall`、`memory_revise`、`memory_forget`、BM25、缓存 | 记忆变更立即更新索引和缓存，同一会话的检索结果正确 |
 | M2 | `/mneme-gc`、`/mneme-stats` | 连续使用两周并检查报告和指标 |
 
 ## 11. 已知风险
