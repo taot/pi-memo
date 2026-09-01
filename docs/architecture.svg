@@ -70,7 +70,7 @@
 
   <rect x="336" y="508" width="360" height="60" rx="6" fill="#faf8ff" stroke="#ddd6f3"/>
   <text x="352" y="531" font-size="13.5" font-weight="600" fill="#1f2328">GC 与统计</text>
-  <text x="352" y="550" font-size="11.5" fill="#57606a">列候选 → 逐条问你 → 重建 MEMORY.md 与 .cache/</text>
+  <text x="352" y="550" font-size="11.5" fill="#57606a">生成报告，不逐条提问 → 重建 MEMORY.md 与 .cache/</text>
 
   <!-- ============ column C ============ -->
   <rect x="764" y="116" width="308" height="142" rx="6" fill="#f5fbf6" stroke="#c2e3cb"/>
@@ -105,7 +105,7 @@
 
   <rect x="764" y="536" width="308" height="40" rx="6" fill="#eef7f0" stroke="#c2e3cb"/>
   <text x="780" y="553" font-size="11.5" font-weight="600" fill="#1f2328">状态机（永不删文件）</text>
-  <text x="780" y="569" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#15803d">active → superseded | archived</text>
+  <text x="780" y="569" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#15803d">status: active ↔ archived</text>
 
   <!-- ============ arrows A -> B ============ -->
   <line x1="268" y1="144" x2="330" y2="150" stroke="#57606a" stroke-width="1.3" marker-end="url(#ar)"/>

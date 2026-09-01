@@ -53,7 +53,7 @@
   <text x="606" y="196" font-size="10.5" fill="#1f2328">· 继任者失去承接能力 → 复活为 active，清掉 superseded_by</text>
   <text x="592" y="219" font-size="10.5" fill="#8a4b08">链 A ← B ← C：B 虽已 archived，但知识由 C 承接 —— A 不复活</text>
   <text x="592" y="238" font-size="10.5" fill="#57606a">判据：继任者不再 active，且它自己的 superseded_by 为空（非空才归 GC 管）</text>
-  <text x="592" y="259" font-size="10.5" fill="#8a4b08">检索判据 = archived ∨ 有 active 继任者 —— revise 后即刻生效，不等 GC</text>
+  <text x="592" y="259" font-size="10.5" fill="#8a4b08">检索判据 = archived ∨ 有 active 继任者 —— 下个 session 生效，不等 GC</text>
 
   <!-- ===== card 3: the two non-states ===== -->
   <rect x="576" y="284" width="512" height="164" rx="8" fill="#ffffff" stroke="#e4e2dc"/>
