@@ -69,14 +69,14 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 | 事件 | 实际发生的事 |
 |---|---|
-| `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——归档等下一次 GC（§3.3） |
+| `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——归档等下一次 GC，在那之前旧条目仍是 `active`、仍可被召回（§3.3） |
 | `verify` 失败、URL 挂掉、`hits == 0 且 age > 90d` | 只进 GC 报告，等你定夺（§8 B 组） |
 | GC 在 `archive/` 与 kind 目录之间搬文件 | `status` 的下游物化，不是它的输入（§3.4） |
 | `git rm` 一个条目 | 在状态机之外，文件消失，没有状态迁移（§3.5） |
 
 **不变量**：
 
-- `status: archived` ⟺ 不进索引、不进检索；这是唯一判据（§7）。
+- 不进索引、不进检索 ⟺ 条目 frontmatter 里的 `status` 字面等于 `archived`。**只看这个字段**，不叠加任何推导——取代关系已由 GC 物化进字段（§3.3），读取路径不再查反向索引（§7）。
 - 任何 `archived` 条目必有非空 `archived_reason`。
 - `superseded_by` 非空 ⟺ 该条目的 `archived` 由取代关系物化而来，GC 可以撤销它；为空则 GC 永不改写其 `status`。
 - 归档不删文件，被取代不删文件。删除只由 `git rm` 发生。
