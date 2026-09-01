@@ -20,11 +20,11 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 | 不做 | 理由 |
 |---|---|
-| Working memory（上下文折叠/压缩） | pi 已有 compaction 机制（`session_before_compact`）。这是独立的工程问题，硬塞进来会让 v1 无法收敛。挂钩点留着，见 §8 M3。 |
+| Working memory（上下文折叠/压缩） | pi 已有 compaction 机制（`session_before_compact`）。这是独立的工程问题，硬塞进来会让 v1 无法收敛。挂钩点留着，见 §9 M3。 |
 | Parametric / latent memory（论文 3.2 / 3.3） | 需要训练或改推理栈，与"可读、可审计"的目标直接冲突。 |
 | 图结构记忆（论文 3.1.2 / 3.1.3） | 构建与维护成本高，且论文自己指出 planar memory 的搜索成本"significantly hinder its practical deployment"。先用 flat + `[[id]]` 弱关联，等召回质量确实不够再上。 |
 | Skill-based memory（可执行脚本，论文 4.2.3） | 引入执行安全、版本、失效检测一整套问题。pi 已有 skills 机制可以承接。 |
-| 自动写入（会话结束蒸馏 / 离线 consolidation） | 见 §7。触发权保留给你。 |
+| 自动写入（会话结束蒸馏 / 离线 consolidation） | 见 §8。触发权保留给你。 |
 
 ---
 
@@ -32,17 +32,124 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 | 论文维度 | 选择 | 理由 |
 |---|---|---|
-| **Form** (§3) | Token-level, **1D flat** + `[[id]]` 弱关联 | 可读、可 git、可手改。论文 §3.1.1 讨论：flat 的代价是"coherence and relevance depend heavily on retrieval quality"——所以检索质量是本设计的主要风险点，见 §6 和 §9。 |
+| **Form** (§3) | Token-level, **1D flat** + `[[id]]` 弱关联 | 可读、可 git、可手改。论文 §3.1.1 讨论：flat 的代价是"coherence and relevance depend heavily on retrieval quality"——所以检索质量是本设计的主要风险点，见 §7 和 §10。 |
 | **Function** (§4) | Factual(user + environment) + Experiential(insight) | 覆盖 coding agent 收益最大的三块。 |
 | **Formation** (§5.1) | Knowledge distillation，由 LLM 显式调用 | 不做 semantic summarization（会丢细节）。一条记忆 = 一个可独立成立的结论。 |
 | **Evolution** (§5.2) | 软失效 + 手动 GC | 论文 §5.2.2 指出早期系统（MemGPT/Mem0）的 destructive replace "erasing valuable historical context and breaking temporal continuity"；Zep 改用时间戳软失效。我们照 Zep 的思路，且 git 本身就是历史。 |
-| **Retrieval** (§5.3) | 常驻索引 + 显式 `memory_recall` | 论文 §7.2 主张把记忆操作变成 agent 的显式 tool call，理由是可解释、可追溯、行为一致。索引常驻是对 §5.3.1 提到的 silent failure mode 的对冲，见 §5.1。 |
+| **Retrieval** (§5.3) | 常驻索引 + 显式 `memory_recall` | 论文 §7.2 主张把记忆操作变成 agent 的显式 tool call，理由是可解释、可追溯、行为一致。索引常驻是对 §5.3.1 提到的 silent failure mode 的对冲，见 §6.1。 |
 
 ---
 
-## 3. 存储
+## 3. 条目状态
 
-### 3.1 三层作用域
+一条记忆的一生只有一个状态字段，两个取值。被取代不是第三个取值，而是一条通往 `archived` 的边——真相是关系，`status` 是 GC 依关系物化出来的视图。另外两件看着像状态的事——在哪个目录、被删掉——则完全不是状态。§3.1 先把状态机原样列出来，§3.2 起逐条解释它为什么长这样。这一节排在存储之前，因为 frontmatter 里好几个字段只有在这个模型下才讲得通。
+
+![记忆条目的状态](entry-lifecycle.svg)
+
+### 3.1 状态机
+
+**状态**（`status` 字段，无中间态）：
+
+| 值 | 索引与检索 | 必备字段 |
+|---|---|---|
+| `active` | 进索引，可召回 | —（写入时的默认值） |
+| `archived` | 不进索引，不可召回；文件仍在 | `archived_reason` |
+
+**转移**：
+
+| 边 | 触发者 | 条件 | 同时写入 |
+|---|---|---|---|
+| `active → archived` | `memory_forget` | 模型判断该忘掉，必须给 `reason` | `archived_reason = reason` |
+| `active → archived` | `/mneme-gc --apply` | 你在 GC 报告里勾选 | `archived_reason` |
+| `active → archived` | `/mneme-gc`（自动，A 步骤 1） | 存在一条 `active` 记忆 `supersedes` 它 | `archived_reason = "被 <new-id> 取代：<supersede_reason>"`；`superseded_by = <new-id>` |
+| `archived → active` | `/mneme-gc`（自动，A 步骤 1） | `superseded_by` 非空，且该继任者不再 `active`、其自身 `superseded_by` 为空 | 清空 `archived_reason`、`superseded_by` |
+| `archived → active` | 你手改 frontmatter | 无 | 由你清空 `archived_reason` |
+
+**不构成转移的事件**：
+
+| 事件 | 实际发生的事 |
+|---|---|
+| `memory_revise` 取代一条记忆 | 只往旧条目写 `superseded_by`，`status` 不动——归档等下一次 GC（§3.3） |
+| `verify` 失败、URL 挂掉、`hits == 0 且 age > 90d` | 只进 GC 报告，等你定夺（§8 B 组） |
+| GC 在 `archive/` 与 kind 目录之间搬文件 | `status` 的下游物化，不是它的输入（§3.4） |
+| `git rm` 一个条目 | 在状态机之外，文件消失，没有状态迁移（§3.5） |
+
+**不变量**：
+
+- `status: archived` ⟺ 不进索引、不进检索；这是唯一判据（§7）。
+- 任何 `archived` 条目必有非空 `archived_reason`。
+- `superseded_by` 非空 ⟺ 该条目的 `archived` 由取代关系物化而来，GC 可以撤销它；为空则 GC 永不改写其 `status`。
+- 归档不删文件，被取代不删文件。删除只由 `git rm` 发生。
+
+### 3.2 谁配写 `archived`
+
+每条边都是同一个字段的整体赋值，没有中间态——所以手改 frontmatter 随时可以逆转任一方向，不需要任何撤销机制。"markdown 可手改"这条目标在状态机上就兑现为这一句。唯一的例外是被取代的条目，它的 `status` 是派生物，手改会被下次 GC 改回去（§3.3 末）。
+
+**界线在哪。** 界线不是"自动 vs 手动"——`memory_forget` 由模型自行调用，没有你的批准，它当然是自动的。界线是这个 `archived` 背后有没有一次针对内容的判断：
+
+- **对这条记忆内容的判断**（可以写 `archived`）：读过它，认为它错了、过时了、或已被另一条写得更好的记忆取代，且必须留下理由。`memory_forget` 的 `reason` 和 `memory_revise` 的 `supersede_reason` 都是这样的理由。
+- **机械规则的副产品**（一律不能写状态）：`verify` 失败只标"待核"；URL 内容判断只标"待核"；`hits == 0 且 age > 90d` 只让它进候选列表。
+
+GC 物化取代关系时写的 `archived` 属于第一类：判断发生在 `memory_revise` 那一刻，模型读过旧条目、写出了继任者、给了 `supersede_reason`；GC 只是把这个判断落到字段上，自己不产生任何新判断。这条界线因此没有松动——**GC 能写 `status`，当且仅当它在物化一个已经存在的判断。**
+
+`archived` 的语义是"有人判断过这条不该再存在"。一旦机械规则能写它，这个语义即刻作废。也正因为它只由判断产生，才配当一个存储状态。
+
+**归档是不对称的，所以必须可复查。** 模型写错一条记忆，你迟早会读到并改掉；模型误归档一条好记忆，你收不到任何信号，只会觉得它"最近好像不太记得那件事了"——这是 §10 那个 silent failure 的另一副面孔。这里不加人工确认（会违背显式 tool call 路线，且 print / RPC 模式无法弹窗），改为保证出口：`archived_reason` 强制、文件永不删除、git 有记录，且 `/mneme-stats` 与 `/mneme-gc` 都要列出最近归档的条目及其理由。
+
+### 3.3 被取代：是关系，由 GC 物化成 `archived`
+
+**真相是关系**：存在另一条 `active` 记忆 `supersedes: X`，则 X 已被取代。这条关系由反向索引判定，反向索引本来就要为 `because` 而建（§4.2.2），增量成本为零。
+
+**状态是物化**：`/mneme-gc` 依这条关系双向写 X 的 `status`——
+
+- X 有 `active` 继任者，而 X 仍是 `active` → 置 `archived`，`archived_reason` 写"被 `<new-id>` 取代：`<supersede_reason>`"，并确保 `superseded_by: <new-id>`；
+- X 是 `archived`、`superseded_by` 非空，而继任者已**失去承接能力** → 复活为 `active`，清掉 `archived_reason` 和 `superseded_by`。
+
+"失去承接能力"要顺着取代链判，不能只看继任者是不是 `active`。链 A ← B ← C（C 取代 B，B 取代 A）里 B 必然是 `archived`，但知识由 C 承接着，A 不该复活。判据是**继任者不再 `active`，且它自己的 `superseded_by` 为空**——即它是被 `memory_forget` 归档的、或者文件根本不在了，链到此为止，没有下一棒。继任者若也是因取代而归档，跳过它，A 保持 `archived`。这条判据与 `memory_forget` 那句提示（本节下文）严丝合缝：归档一条 `supersedes` 了别人的记忆，恰恰就是把链掐断，前任因此复活。
+
+这与 §3.4 的目录搬运是同一个模式，连"必须双向"的理由都一样：少了反向那一半，继任者一消失，前任就永久停在 `archived`，而没有任何继任者顶上——那条知识就静默消失了。
+
+**为什么归档比留在 `active` 好。** 另一种做法是让被取代的条目一直保持 `active`，靠索引期查询把它排除在检索之外，理由是"没有状态迁移就不需要撤销机制"。代价是"这条能不能被召回"有了两个来源：一个 `status` 字段，加一次反向索引推导。每个读取路径都得记得跑第二个，漏掉一处就是一条本该退休的记忆重新冒出来。物化之后只剩一个判据——**不进检索 ⟺ `status: archived`**（§7），而撤销机制并没有真的消失，只是从"每次查询重新推导"变成"每次 GC 重新物化"，同一个反向索引，同一个结论。
+
+**继任者消失不是罕见情况**：切分支（L2 随 repo 走，你在 feature 分支上 revise 的继任者，切回 main 就不存在）、`git revert` 或合并时被丢弃、继任者自己被归档。上面第二条规则正是为它们准备的。最后一种还要额外防一手：你以为整个话题都不要了，归档了当前这条，结果前任被 GC 复活。所以 `memory_forget` 一条 `supersedes` 了别人的记忆时，必须先说明"归档它会让 `<前任 id>` 在下次 GC 时复活"，由模型决定是否连前任一起归档。不静默复活。
+
+**`superseded_by` 因此升级成了判据。** 光看 `status: archived` 分不出这条是被 `memory_forget` 归档的（GC 绝不能碰）还是被取代归档的（GC 该在继任者消失时复活它）；`superseded_by` 非空就是这个区分。它同时仍是给人看的标记——人打开 `exp/foo.md` 能直接看见自己被谁取代了，不必 grep 整个库找 `supersedes: foo`。所以 `memory_revise` 当场就往旧文件写 `superseded_by: <new-id>`，不等 GC。
+
+它不再是"烂掉也无所谓"的装饰，规则收紧为两条：反向索引永远是真相，标记与推导冲突时推导赢；GC 发现悬空的 `superseded_by`（继任者已不存在）时，**先复活再清标记**——顺序反了就会把一条没有继任者的记忆永久留在 `archived`。
+
+**滞后窗口。** `memory_revise` 只写 `superseded_by`，不当场改 `status`——与 `memory_forget` 不移动文件同构：工具做轻量标记，GC 做物化。所以两次 GC 之间，旧条目的 `status` 仍是 `active`，仍可能被召回。这是可接受的：继任者内容更好、`updated` 更新，排序本来就在前面；且旧条目自带 `superseded_by`，模型读到时看得见"我已被 X 取代"。跑之间的短暂噪声，换掉每个读取路径都要跑一次推导的永久复杂度。
+
+**代价：手改被取代条目的 `status` 无效。** 它是派生物，你改成 `active`，下次 GC 又依关系改回 `archived`（§3.2 开头那句"随时可逆转"的唯一例外）。要真正复活一条被取代的记忆，得动继任者——删掉继任者的 `supersedes` 字段，或者把继任者归档。
+
+这与 `archive/` 目录是同一个模式：**派生是真相，物化是给人看的，只有 GC 负责让两者收敛。**
+
+### 3.4 目录位置：是 GC 物化的视图
+
+`status` 是真相，`archive/` 目录是它的物化。`memory_forget` 只翻 `status`，不动文件位置——快、可逆、不在会话中途制造路径变更；`/mneme-gc` 本来就要重建索引与缓存，顺手依 `status` 把文件搬到位，双向搬（规则见 §4.2.3）。
+
+之所以不让 forget 当场移动：那样"这条记忆是否还在用"就同时由目录和 `status` 表示，两个真相源会打架。因为 GC 是唯一动布局的地方，每次跑完两者按构造一致；跑之间以 `status` 为准。
+
+被取代的条目**照搬不误**——GC 在同一趟里先依关系物化 `status`（§3.3），再依 `status` 物化位置，所以它归档后一并进 `archive/`；继任者哪天消失，也是先复活成 `active`、再被搬回 kind 目录。两步的顺序是固定的：**关系 → `status` → 目录**，`status` 在中间既是前一步的产物又是后一步的输入。
+
+### 3.5 删除：在系统之外
+
+永不自动发生。归档不删文件，被取代也不删文件；删除只有你 `git rm`。
+
+注意不要用"保留历史"来论证保留文件：git 已经存了历史，`git log --diff-filter=D` 就能翻出被删的条目。那句话其实论证了删除是**安全的**。真正的理由是删除会引入三处边界情况，而它们都是前两节刚消掉的：
+
+1. **链悬空。** 新条目的 `supersedes: <old-id>` 指向不存在的 id——而 §8 正把这个列为 GC 要抓的缺陷。
+2. **复活失效。** "继任者消失则前任复活"这条规则（§3.3），前提是前任的文件还在。
+3. **翻旧版的成本。** 从"打开文件"变成"翻 git log 找到那次删除"。
+
+而收益只有磁盘和噪声。一条记忆约 1 KB，一千条被取代的记忆是 1 MB——**存储从来不是这个决定的变量**；噪声则已由 `archive/` 目录解决。拿三处边界情况换 1 MB，不划算。
+
+**真要清理时，该删的是 `archive/` 里带 `superseded_by` 的那些，不是另一半。** 两者现在同处一个目录，但"删掉会失去什么"根本不同：带 `superseded_by` 的有继任者，知识还在，删掉只损失措辞；不带的没有继任者，是有人明确判断过不该再存在的，删掉这条知识就真的消失了。直觉容易反过来——后者听起来才像"你说过不要的东西"。
+
+---
+
+## 4. 存储
+
+### 4.1 三层作用域
 
 ```
 ~/.pi/mneme/                     # L1 全局（永不进 repo）
@@ -52,7 +159,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
   archive/                       #   已归档，GC 挪进来，不进索引不进检索
   MEMORY.md                      #   L1 索引
   .cache/                        #   派生索引，可重建
-  .git/                          #   L1 自成一个本地仓库，见 §3.2.3
+  .git/                          #   L1 自成一个本地仓库，见 §4.2.3
 
 <repo>/.pi/mneme/                # L2 项目内（随 repo 进 git）
   env/*.md                       #   项目 environment factual：架构、约定、构建命令、环境怪癖
@@ -62,7 +169,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
   .cache/                        #   gitignore
 ```
 
-### 3.1.1 scope × kind 矩阵
+### 4.1.1 scope × kind 矩阵
 
 `scope` 回答"换个 repo 还成立吗"，`kind` 回答"这是什么性质的知识"。两者正交：
 
@@ -73,7 +180,7 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 唯一的非法组合是 `project` × `user`：关于你的事实永远属于 L1，永远不进 repo。工具层校验并给出明确报错，不静默改写。
 
-### 3.1.2 `env` 和 `exp` 怎么分
+### 4.1.2 `env` 和 `exp` 怎么分
 
 判据只有一条，且必须是可当场执行的：
 
@@ -94,13 +201,13 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 **为什么值得分成两个 kind**：`env` 天生可自动核对——`/mneme-gc` 可以重跑那条命令、grep 那个文件，判定记忆是否已陈旧（对应论文 §5.2.2 的 stability-plasticity 问题，在这类记忆上是可自动化的）。`exp` 没有这条路，只能靠你判断。混成一个 kind，这条自动化路径就没了。
 
-**分不清时的兜底**：说明它是两条记忆被塞进了一条。拆开——一半是可核实的事实，另一半是我们的选择。这也是 §3.2"一文件 = 一条结论"约束的实际用法。
+**分不清时的兜底**：说明它是两条记忆被塞进了一条。拆开——一半是可核实的事实，另一半是我们的选择。这也是 §4.2"一文件 = 一条结论"约束的实际用法。
 
 举个真实的例子：*"KDE Wayland 下程序设定窗口位置会静默失败，改用 kdotool"* 读起来像一条，其实是两条：前半句可以查 Wayland 协议文档核实（`env`），后半句是我们在两个方案里选了一个（`exp`，另一个选项是让断言不依赖绝对坐标）。拆开之后，前者未来可以自动查陈旧，后者进索引时会带上"为什么没选另一个"。
 
 `pi-dioxus/docs/memory/` 里已有的手写笔记正好是 L2 `env/` 的内容，迁移即可。
 
-### 3.2 记忆文件格式
+### 4.2 记忆文件格式
 
 承 §3.1.2，同一件事拆成两个文件。
 
@@ -117,7 +224,7 @@ hits: 0
 last_hit: null
 status: active            # active | archived；只由 memory_forget / GC 写
 supersedes: null
-superseded_by: null       # 物化标记，非真相，见 §3.2.3
+superseded_by: null       # 物化标记 + 归档来源判据，非真相，见 §3.3
 verify:
   kind: url
   ref: https://wayland.freedesktop.org/docs/html/
@@ -157,14 +264,14 @@ tags: [e2e, screenshot, kdotool]
 - 一个文件 = 一条记忆 = 一个可独立成立的结论。正文 ~200 字以内，超了通常说明该拆。
 - `exp` 必须有"下次怎么办"。只描述现象不给行动的记忆，召回了也没用。
 - `exp` 应写出**没选的那个方案**。少了它，将来条件变化时你无法判断这个选择还成不成立。
-- `env` 应有 `verify:`，见 §3.2.1。写不出 `verify` 的，多半不是 `env`。
+- `env` 应有 `verify:`，见 §4.2.1。写不出 `verify` 的，多半不是 `env`。
 - `id` 即文件名（不含 `.md`），kebab-case，全局唯一。
-- 两种引用，语义不同，不要混用，见 §3.2.2。
-- `status` 只有两态，见 §3.2.3。"被取代"不是状态，是关系。
+- 两种引用，语义不同，不要混用，见 §4.2.2。
+- `status` 只有两态。"被取代"不是第三态，而是一条由 GC 双向物化到 `archived` 的关系，见 §3.3。
 
-### 3.2.1 `verify` 字段
+### 4.2.1 `verify` 字段
 
-`env` 记忆的核实方法。结构化而非自由文本，因为 `/mneme-gc` 要能直接执行它（§7）。
+`env` 记忆的核实方法。结构化而非自由文本，因为 `/mneme-gc` 要能直接执行它（§8）。
 
 ```yaml
 verify:
@@ -184,7 +291,7 @@ verify:
 1. **HTTP 状态**——免费。404 / 410 / 域名失效是零成本的强信号：这条记忆的依据本身没了。**默认开**。
 2. **内容判断**——抓正文，问一次模型"这页还支持这条陈述吗"。`url` 的 `expect` 写成一句人话就是给这一步读的。要花 token、等网络，且文档改版会造成大量假阳性，所以**默认关**，用 `/mneme-gc --check-urls` 显式打开。
 
-**内容判断的结论只能是"待核"，永远不能自动归档或改写记忆。** 抓回来的网页是不可信内容，让模型读外部页面去裁决你的记忆，这条路径上页面里的文字可能试图影响判断。摆给你看、由你定夺，与 §7 里 GC 只提候选是同一个原则。
+**内容判断的结论只能是"待核"，永远不能自动归档或改写记忆。** 抓回来的网页是不可信内容，让模型读外部页面去裁决你的记忆，这条路径上页面里的文字可能试图影响判断。摆给你看、由你定夺，与 §8 里 GC 只提候选是同一个原则。
 
 两条硬约束：
 
@@ -195,7 +302,7 @@ verify:
 
 **为什么没有单独的"来源"字段**：来源和核实方法多数时候是同一个东西，分成两个字段必然漂移。两者确实分叉时（例：某个 panic 是线上崩了才知道的，但核实要查文档），存**核实方法**——记忆系统的失败模式是陈旧而不是溯源，"当时为什么信"帮不上 GC 的忙。
 
-### 3.2.2 `because:` 与 `[[id]]`
+### 4.2.2 `because:` 与 `[[id]]`
 
 记忆之间有两种关系，只有一种需要结构化。
 
@@ -204,96 +311,24 @@ verify:
 | `[[id]]`（写在正文里） | 相关，值得一起看 | 无 | 合法，标记一条还没写的记忆 | 否 |
 | `because:`（写在 frontmatter） | **我的前提** | 有 | 非法，写入时校验 | 是 |
 
-`because:` 存在的唯一理由是**陈旧传播**：`verify` 把一条 `env` 判为待核之后（§3.2.1），建立在它之上的 `exp` 同样可疑——那个选择的全部理由可能已经不成立了。GC 顺着反向索引把这些 `exp` 一并列出（§7 步骤 2）。没有这个字段，拆分 `env` / `exp` 只换来一个能自动查陈旧的 `env`，而依赖它的判断仍然静静地烂在那里。
+`because:` 存在的唯一理由是**陈旧传播**：`verify` 把一条 `env` 判为待核之后（§4.2.1），建立在它之上的 `exp` 同样可疑——那个选择的全部理由可能已经不成立了。GC 顺着反向索引把这些 `exp` 一并列出（§8 报告第 2 组）。没有这个字段，拆分 `env` / `exp` 只换来一个能自动查陈旧的 `env`，而依赖它的判断仍然静静地烂在那里。
 
 多数 `because:` 指向 `env`。指向另一条 `exp` 也合法（一个选择建立在更早的选择之上），形成链，陈旧沿链传递。
 
 反向也要用：`memory_forget` 一条仍被依赖的记忆时，先列出依赖方再让模型确认，不静默孤立它们。
 
-### 3.2.3 `status` 与"被取代"
+### 4.2.3 物理布局与 git
 
-![记忆条目生命周期](entry-lifecycle.svg)
+承 §3.4——目录是 GC 依 `status` 物化的视图，规则双向：
 
-`status` 只有两态：
+- `status: archived` 的 `git mv` 进 `archive/`，保留 `user/` `env/` `exp/` 子结构；
+- `status: active` 却躺在 `archive/` 里的，移回对应的 kind 目录。
 
-| | 含义 | 谁写 |
-|---|---|---|
-| `active` | 在用，进索引，可召回 | 默认 |
-| `archived` | 模型或你判断过这条不该再存在 | `memory_forget` 或 GC，必带 `archived_reason` |
-
-**"被取代"不是状态，是关系**，由 `supersedes` 的反向索引推导：存在另一条 `active` 记忆 `supersedes: X`，则 X 判定为已退休——退出索引与检索，但文件仍在，`memory_recall` 用 `ids` 直接点名仍可读到（附带"已被 Y 取代"）。
-
-注意 X 的 `status` 字段**自始至终是 `active`**。退休是构建索引时的一次查询期判定，不是一次写入。这一点决定了下面所有行为。
-
-**但存储也是给人看的**，所以要有个物化标记。人打开 `exp/foo.md` 时，光看 `status: active` 无从知道它已被取代——除非去 grep 整个库找 `supersedes: foo`。这违背本设计的第一目标。
-
-加 `superseded_by: <new-id>`，规则三条：
-
-- `memory_revise` 立刻写进旧文件，消除"要等下次 GC 才看得见"的时间差。
-- **它永远不是真相。** 判定只看反向索引；标记与推导冲突时，推导赢。
-- 指向不存在的 id（继任者随分支切没了）→ 加载时忽略，GC 顺手清掉。
-
-标记烂掉不会导致任何错误行为，只会暂时误导人眼，而 GC 每次都修。这与 `archive/` 目录是同一个模式：**派生是真相，物化是给人看的，只有 GC 负责让两者收敛。**
-
-**什么时候写 `archived`**——只有两个入口，都要求有人明确决定：
-
-| 入口 | 谁决定 |
-|---|---|
-| `memory_forget` | 模型判断这条不该再存在，且必须给 `reason` |
-| `/mneme-gc` 的逐条询问（§7 步骤 4） | 你选"归档" |
-
-界线不是"自动 vs 手动"——`memory_forget` 由模型自行调用，没有你的批准，它当然是自动的。界线是：
-
-- **对这条记忆内容的判断**（可以写 `archived`）：读过它，认为它错了或过时了，且必须给出 `reason`。
-- **机械规则的副产品**（一律不能写状态）：`verify` 失败只标"待核"；URL 内容判断只标"待核"；`hits == 0 且 age > 90d` 只让它进候选列表。
-
-`archived` 的语义是"有人判断过这条不该再存在"。一旦机械规则能写它，这个语义即刻作废。也正因为它只由判断产生，才配当一个存储状态；而"被取代"是关系的副产物，没有任何人为它做过判断，所以不配。
-
-**归档是不对称的，所以必须可复查。** 模型写错一条记忆，你迟早会读到并改掉；模型误归档一条好记忆，你收不到任何信号，只会觉得它"最近好像不太记得那件事了"——这是 §9 那个 silent failure 的另一副面孔。这里不加人工确认（会违背显式 tool call 路线，且 print / RPC 模式无法弹窗），改为保证出口：`archived_reason` 强制、文件永不删除、git 有记录，且 `/mneme-stats` 与 `/mneme-gc` 都要列出最近归档的条目及其理由。
-
-之所以不设 `superseded` 状态，是因为那会把同一个事实存两遍，且失败模式很隐蔽：
-
-> 你 `git revert` 掉了那条新记忆，旧条目上的 `status: superseded` 还在。旧记忆退出了索引和检索，却没有任何继任者——这条知识静默消失了，GC 也发现不了，因为它的状态"合法"。
-
-推导则不会：新条目没了，反向索引里就没人取代它，下次重建索引时那条判定不再成立，旧条目自然重新出现。**没有状态迁移，所以不需要撤销机制**——这正是把取代做成推导而非存储状态的收益。反向索引本来就要为 `because` 而建（§3.2.2），增量成本为零。
-
-继任者消失不是罕见情况：
-
-- **切分支**——L2 随 repo 走。你在 feature 分支上 revise 了一条记忆，切回 main，继任者根本不存在。最常见的一种。
-- **`git revert` 或合并时被丢弃**——记忆和代码同处一个 repo，就会跟着代码的历史操作走。
-- **继任者自己被 `memory_forget` 归档**——它一旦是 `archived` 就不再是 active，取代关系随之失效，前任重新生效。
-
-最后一条要防：你以为整个话题都不要了，归档了当前这条，结果前任顶上来。所以 `memory_forget` 一条 `supersedes` 了别人的记忆时，必须先说明"归档它会让 `<前任 id>` 重新生效"，由模型决定是否连前任一起归档。不静默复活。
-
-这与 `because` 是同一条原则：**关系写成结构化字段并单向存储，状态只描述有人主动做过的决定。**
-
-**物理布局：status 是真相，目录是 GC 维护的物化视图。**
-
-`memory_forget` 只翻 `status`，不动文件位置——快、可逆、不在会话中途制造路径变更。`/mneme-gc` 本来就要重建索引与缓存，顺手依 `status` 物化位置。
-
-**物化是双向的**：`status: archived` 的 `git mv` 进 `archive/`（保留 `env/` `exp/` 子结构）；`status: active` 却躺在 `archive/` 里的移回去。少了反向这一半，你手改 status 复活一条记忆之后，它的位置会永久停在 `archive/`，位置与状态从此不一致。
-
-"翻状态"和"挪文件"分成两步，只针对**两次 GC 之间**被 `memory_forget` 归档的条目。GC 自己归档的没有时间差：步骤 4 你选"归档"写下状态，步骤 5 重建时自然捡起它一并移动（§7），同一次运行内完成，不需要特例。
-
-之所以不让 forget 当场移动：那样"这条记忆是否还在用"就同时由目录和 status 表示，两个真相源会打架——你手改 frontmatter 把 status 改回 `active`，文件却还躺在 `archive/` 里。因为 GC 是唯一动布局的地方，每次跑完两者按构造一致；跑之间以 status 为准。被 `supersedes` 判定退休的条目**不移动**——它的 status 仍是 `active`，且随时可能因为继任者消失而重新生效（见上）。移动会让这个推导失去意义。
-
-**永不自动删除——理由是复杂度，不是历史。**
-
-注意不要用"保留历史"来论证保留文件：git 已经存了历史，`git log --diff-filter=D` 就能翻出被删的条目。那句话其实论证了删除是**安全的**。
-
-真正的理由是删除会引入三处边界情况，而它们都是本节和 §3.2.2 刚消掉的：
-
-1. **链悬空。** 新条目的 `supersedes: <old-id>` 指向不存在的 id——而 §7 正把这个列为 GC 要抓的缺陷。要修就得在删除时把旧标题回写进新条目，多一套改写逻辑。
-2. **重新生效失效。** "继任者消失则前任重新出现"这条推导，前提是前任的文件还在。
-3. **翻旧版的成本。** 从"打开文件"变成"翻 git log 找到那次删除"。
-
-而收益只有磁盘和噪声。一条记忆约 1 KB，一千条被取代的记忆是 1 MB——**存储从来不是这个决定的变量**；噪声则已由 `archive/` 目录解决。拿三处边界情况换 1 MB，不划算。
-
-**真要清理时，该删的是"被取代"，不是"已归档"**，两者在"删掉会失去什么"上根本不同：被取代的条目有继任者，知识还在，删掉只损失措辞；已归档的没有继任者，是你明确说过不要的，删掉这条知识就真的消失了。直觉容易反过来——`archive/` 那个目录名看着才像该清理的对象。
+少了反向这一半，你手改 status 复活一条记忆之后，它的位置会永久停在 `archive/`，位置与状态从此不一致。
 
 **两层都要有 git。** 删除交给 `git rm`，是你的决定；但这要求存储处在版本控制下。L2 随 repo 天然满足，**L1 不满足**，所以 `~/.pi/mneme/` 自己初始化成一个本地仓库，`/mneme-gc` 结束时提交一次（从不 push）。否则"删除可恢复"在全局层是空话，而 L1 装的恰恰是最难重建的东西：你的偏好和跨项目经验。附带收益是记忆演化有完整审计轨迹，对应论文 §7.7 把可审计列为可信记忆的支柱。
 
-### 3.3 索引 MEMORY.md
+### 4.3 索引 MEMORY.md
 
 自动生成，不手改（手改会被 `/mneme-gc` 覆盖）：
 
@@ -309,11 +344,11 @@ verify:
 - [e2e-window-positioning-via-kdotool](exp/e2e-window-positioning-via-kdotool.md) — E2E 窗口定位走 kdotool，没选"断言不依赖绝对坐标"
 ```
 
-每条一行：id + 一句钩子（取自 title）。**索引是唯一常驻进 context 的东西**，预算见 §5.1。
+每条一行：id + 一句钩子（取自 title）。**索引是唯一常驻进 context 的东西**，预算见 §6.1。
 
 ---
 
-## 4. 工具面
+## 5. 工具面
 
 四个工具，对应论文 Dynamics 的三个算子（§5.1 formation / §5.2 evolution / §5.3 retrieval）。
 
@@ -330,7 +365,7 @@ Type.Object({
 })
 ```
 
-返回命中记忆的全文 + id + scope。副作用：`hits += 1`，`last_hit = now`（记账写回 frontmatter，见 §9）。
+返回命中记忆的全文 + id + scope。副作用：`hits += 1`，`last_hit = now`（记账写回 frontmatter，见 §10）。
 
 ### `memory_write` — 形成
 
@@ -355,11 +390,11 @@ Type.Object({
     kind: Type.Union([Type.Literal("file"), Type.Literal("command"), Type.Literal("url")]),
     ref: Type.String({ description: "Repo-relative path (no line number), a read-only command, or a doc URL." }),
     expect: Type.String({ description: "Substring that must still be found in the file or command output." }),
-  }, { description: "kind=env only. How to confirm this is still true. See §3.2.1." })),
+  }, { description: "kind=env only. How to confirm this is still true. See §4.2.1." })),
   because: Type.Optional(Type.Array(Type.String(), {
     description:
       "ids this memory rests on as premises. Mostly env ids under an exp. " +
-      "Every id must already exist — this is a dependency, not a soft link. See §3.2.2.",
+      "Every id must already exist — this is a dependency, not a soft link. See §4.2.2.",
   })),
   tags: Type.Optional(Type.Array(Type.String())),
   links: Type.Optional(Type.Array(Type.String(), { description: "ids of merely related memories (soft, may dangle)" })),
@@ -378,7 +413,9 @@ Type.Object({
 })
 ```
 
-**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**不改 `status`**——它由反向索引判定退休（§3.2.3）；只往旧文件写一个 `superseded_by: <new-id>` 物化标记，供人阅读，机器不依赖它。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+**不覆盖**：新建一条带新 id 的记忆，`supersedes: <old-id>`，`reason` 写进新条目的 frontmatter（`supersede_reason`）。旧文件**当场只写 `superseded_by: <new-id>`，不改 `status`**——归档由 `/mneme-gc` 依取代关系统一物化（§3.3），与 `memory_forget` 不移动文件是同一个模式：工具做轻量标记，GC 做物化。所以旧条目在下次 GC 前仍是 `active`，仍可能被召回；`superseded_by` 会跟着一起返回，模型看得见它已被谁取代。文件留在磁盘和 git 历史里。对应论文 §5.2.2 里 Zep 的时间戳软失效思路。
+
+`supersede_reason` 必须落盘还有第二个用处：GC 归档旧条目时要拿它填 `archived_reason`（`archived` 强制带理由，§3.1）。
 
 ### `memory_forget` — 遗忘
 
@@ -389,14 +426,14 @@ Type.Object({
 })
 ```
 
-置 `status: archived`，把 `reason` 写进 `archived_reason`，移出索引。**不移动文件**——物理归档由 `/mneme-gc` 统一做（§3.2.3）。永不删文件。
+置 `status: archived`，把 `reason` 写进 `archived_reason`，移出索引。**不移动文件**——物理归档由 `/mneme-gc` 统一做（§3.4）。永不删文件。
 
 `reason` 必须落盘。不写下来它就只是一次性的 tool call 参数，将来你看到一条被归档的记忆，只能去翻 git log 才知道当初为什么。
 
 两种情况下先返回信息而不执行，让模型确认：
 
-- 这条记忆仍被别的记忆 `because:` 依赖（§3.2.2）——返回依赖方列表。不静默把依赖悬空。
-- 这条记忆 `supersedes` 了别人（§3.2.3）——说明归档它会让前任重新生效，由模型决定是否连前任一起归档。不静默复活。
+- 这条记忆仍被别的记忆 `because:` 依赖（§4.2.2）——返回依赖方列表。不静默把依赖悬空。
+- 这条记忆 `supersedes` 了别人（§3.3）——说明归档它会让前任在下次 GC 时复活，由模型决定是否连前任一起归档。不静默复活。
 
 ### 工具描述里要写进去的引导
 
@@ -406,11 +443,11 @@ Type.Object({
 
 ---
 
-## 5. 生命周期挂钩
+## 6. 生命周期挂钩
 
 pi 的扩展 API（`packages/coding-agent/src/core/extensions/types.ts`）提供的挂钩，我们只用三个。
 
-### 5.1 `context` — 注入索引
+### 6.1 `context` — 注入索引
 
 ```typescript
 pi.on("context", async (event) => {
@@ -427,17 +464,17 @@ pi.on("context", async (event) => {
 
 不用 `resources_discover`：那个事件只接受 `skillPaths` / `promptPaths` / `themePaths`，不是通用注入点。
 
-### 5.2 `session_start` — 加载
+### 6.2 `session_start` — 加载
 
 扫描 L1 + L2，构建/校验 `.cache/` 索引（按文件 mtime 判断是否需要重建），渲染索引块。`reason` 为 `resume`/`fork` 时同样重建——记忆可能在别的会话里改过了。
 
-### 5.3 `agent_settled` — 只做记账
+### 6.3 `agent_settled` — 只做记账
 
 把 `memory_recall` 累积的 hit 计数批量写回 frontmatter。**不做任何自动蒸馏或整理**——这是你选的边界，我在这里守住它。
 
 ---
 
-## 6. 检索实现
+## 7. 检索实现
 
 v1 不引入 embedding，理由是三层记忆的规模在几百条量级，且引入向量就要引入模型依赖、缓存失效、维度迁移一整套问题，收益未经验证。
 
@@ -451,47 +488,51 @@ score = bm25(query, title*3 + body + tags*2)
       * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
 ```
 
-`status: archived` 以及被反向索引判定已退休的条目（§3.2.3）不进检索；用 `ids` 直接点名仍可读到。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
+**不进检索 ⟺ `status: archived`**，单一判据，读取路径上不再有第二次推导（§3.3）。用 `ids` 直接点名仍可读到，带 `superseded_by` 的会附上"已被 `<new-id>` 取代"。`.cache/` 里存倒排索引，纯 JSON，删了能重建。
 
-升级路径已经留好：打分函数是单一入口，加一路 embedding 召回再做 RRF 融合，是局部改动。**触发条件是 §9 的召回质量指标恶化，不是"因为向量更高级"。**
+升级路径已经留好：打分函数是单一入口，加一路 embedding 召回再做 RRF 融合，是局部改动。**触发条件是 §10 的召回质量指标恶化，不是"因为向量更高级"。**
 
 ---
 
-## 7. 演化与遗忘
+## 8. 演化与遗忘
 
 `/mneme-gc` 是唯一的批量整理入口，由你手动触发，**默认零提问**。
 
 它做两件事，界线是这份设计一路在用的那条：
 
-**A. 自动修复——只碰派生物，从不碰记忆内容或状态。**
+**A. 自动修复——只碰派生物，从不碰记忆内容，也从不产生新判断。**
 
-- 重建 MEMORY.md 和 `.cache/`
-- 依 `status` 物化文件位置，双向：`archived` 的移入 `archive/`，`active` 却躺在 `archive/` 里的移回 `env/` 或 `exp/`（§3.2.3）
-- 清理悬空的 `superseded_by`（继任者已不存在）
-- L1 提交一次（§3.2.3）
+按固定顺序，每一步的输出是下一步的输入：
 
-这些都是视图，重建视图不是决定，不需要问你。
+1. 依取代关系物化 `status`，双向：有 `active` 继任者的置 `archived`（`archived_reason` 取继任者的 `supersede_reason`）；`archived` 且 `superseded_by` 悬空的复活为 `active` 并清掉标记——**先复活再清标记**（§3.3）
+2. 依 `status` 物化文件位置，双向：`archived` 的移入 `archive/`，`active` 却躺在 `archive/` 里的移回对应的 kind 目录（§3.4、§4.2.3）
+3. 重建 MEMORY.md 和 `.cache/`
+4. L1 提交一次（§4.2.3）
+
+第 1 步碰了 `status`，但它没有越过 §3.2 那条界线：它物化的是 `memory_revise` 当时下的判断，GC 自己不判断任何事。**GC 能写 `status`，当且仅当它在物化一个已经存在的判断**——下面 B 部分那些由机械规则发现的东西，一律只进报告。
 
 **B. 生成报告——需要判断的一律只列出，不提问。**
 
 写进 `<store>/GC-REPORT.md`，分组、按严重度排序、每项附可直接执行的建议：
 
-1. **陈旧**：`env` 的 `verify` 失败（§3.2.1）。按成本分层：`file` / `command` 的 `expect` 匹配 + `url` 的 HTTP 状态默认跑；`url` 内容判断由 `--check-urls` 控制（§7.1）。报告里把记忆正文和实际结果并排放。
-2. **受牵连**：上一组每条待核 `env`，顺 `because:` 反向索引找出依赖它的 `exp`（§3.2.2），沿链传递——"这条选择的前提可能已经变了"。这是 `env` / `exp` 拆开的完整收益：`env` 能自动查陈旧，`exp` 靠依赖关系被带出来，两者都不会静静地烂掉。
+1. **陈旧**：`env` 的 `verify` 失败（§4.2.1）。按成本分层：`file` / `command` 的 `expect` 匹配 + `url` 的 HTTP 状态默认跑；`url` 内容判断由 `--check-urls` 控制（§8.1）。报告里把记忆正文和实际结果并排放。
+2. **受牵连**：上一组每条待核 `env`，顺 `because:` 反向索引找出依赖它的 `exp`（§4.2.2），沿链传递——"这条选择的前提可能已经变了"。这是 `env` / `exp` 拆开的完整收益：`env` 能自动查陈旧，`exp` 靠依赖关系被带出来，两者都不会静静地烂掉。
 3. **疑似重复**：正文高度相似的对，建议 `memory_revise` 合并。
-4. **近期归档**：自上次 GC 以来被 `memory_forget` 归档的条目及其 `archived_reason`（§3.2.3）——你唯一能发现模型删错东西的地方。
+4. **近期归档**：自上次 GC 以来被 `memory_forget` 归档的条目及其 `archived_reason`（§3.2）——你唯一能发现模型删错东西的地方。只列 `superseded_by` 为空的；本次 GC 自己因取代而归档的不算，它们有继任者顶着，混进来只会淹掉真正需要你看的那几条。
 5. **久未命中**：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）。报告里要写明：低频不等于无用，长尾记忆往往正是关键的那条。
+
+**B 组只扫 `active` 条目。** 这不是省事，是正确性：被取代的条目已退出检索，`hits` 从此不可能再涨，留在扫描范围里就会在 90 天后必然落入第 5 组——一条"按设计不可能再命中"的记忆被当成"久未命中"摆到你面前，你一勾选，前任就被真正归档了，继任者哪天消失也再没人顶上（§3.3）。物化 `status` 顺带把这个坑填了：它们已经是 `archived`，天然在扫描范围之外。
 6. **待补**：缺 `verify:` 的 `env` 条目、`supersedes` 指向不存在 id 的条目。
 
 看完想处理哪几条就处理哪几条，不处理就关掉——B 部分默认不改任何东西。要批量处理时 `/mneme-gc --apply`，或者直接把报告交给模型按建议逐条调工具。**你的注意力只在真想清理时投入一次，而不是被逐条追问四十遍。**
 
-唯一的提问是 `--check-urls`（§7.1），问的是要不要花这笔 token 和时间，是一次性的成本决策，与逐条审问记忆内容不是一回事。
+唯一的提问是 `--check-urls`（§8.1），问的是要不要花这笔 token 和时间，是一次性的成本决策，与逐条审问记忆内容不是一回事。
 
 不自动跑。论文 §7.8 提倡的离线 consolidation（"睡眠"）能力更强，但它会花你没预算的 token 并改你没看过的文件——留到 M3 作为 opt-in。
 
-### 7.1 `--check-urls` 的三态
+### 8.1 `--check-urls` 的三态
 
-`url` 内容判断要花 token 和网络时间（§3.2.1），所以它不能有一个静默的默认值——静默跳过和静默开销都是坏的。开关取三态：
+`url` 内容判断要花 token 和网络时间（§4.2.1），所以它不能有一个静默的默认值——静默跳过和静默开销都是坏的。开关取三态：
 
 | 调用 | 行为 |
 |---|---|
@@ -519,7 +560,7 @@ score = bm25(query, title*3 + body + tags*2)
 
 ---
 
-## 8. 代码结构与阶段
+## 9. 代码结构与阶段
 
 ```
 pi-mneme/
@@ -546,14 +587,14 @@ pi-mneme/
 |---|---|---|
 | **M0** | store 层（frontmatter 全字段，含 `verify` / `because`）+ `memory_write` / `memory_recall` + 索引注入 | 手动写 5 条记忆，新会话里模型能召回正确的那条 |
 | **M1** | `memory_revise` / `memory_forget` + BM25 打分 + `.cache/` | 迁移 `pi-dioxus/docs/memory/` 全部内容 |
-| **M2** | `/mneme-gc`（自动修派生物 + 报告）+ `/mneme-stats`（§9 指标） | 连用两周，看指标 |
+| **M2** | `/mneme-gc`（自动修派生物 + 报告）+ `/mneme-stats`（§10 指标） | 连用两周，看指标 |
 | **M3**（可选，看 M2 数据） | 向量召回；离线 consolidation；working memory（`session_before_compact`） | —— |
 
 **`verify` 和 `because` 从 M0 就要写入，尽管消费它们的逻辑要到 M2 才有。** 这两个字段记的是写入当下才知道的信息——当时靠什么核实、这个选择建立在什么前提上。M0/M1 期间攒下的记忆如果缺了它们，事后无法重建，M2 的陈旧检查和传播也就无从跑起。字段先行、逻辑后补，代价只是几行 frontmatter。
 
 ---
 
-## 9. 可观测性
+## 10. 可观测性
 
 这是本设计里唯一必须自动化的部分。论文 §5.3.1 的结论值得原样记住：当 agent 高估自己的知识、不去检索时，**系统会静默失效，没有任何错误信号**。既然写入和读取都交给了模型自觉，就必须能测出"模型到底有没有用"。
 
@@ -562,20 +603,20 @@ pi-mneme/
 - **召回率**：有多少比例的会话至少调用过一次 `memory_recall`
 - **命中分布**：`hits == 0` 的记忆占比（写了从没被用过的死记忆）
 - **写入率**：每周新增多少条，分 scope
-- **归档复查**：最近归档的条目、`archived_reason` 和归档时间。模型自行调用 `memory_forget` 不经你批准，这是你唯一能发现它删错东西的地方（§3.2.3）
+- **归档复查**：最近归档的条目、`archived_reason` 和归档时间。模型自行调用 `memory_forget` 不经你批准，这是你唯一能发现它删错东西的地方（§3.2）
 - **索引压力**：当前索引 token 数 / 600 预算
 
 判据：跑两周后如果 `hits == 0` 的记忆超过 60%，说明**要么写入质量差**（写了没用的东西）**要么召回失效**（模型不调工具）。两者的处理方式完全不同——前者改 `memory_write` 的引导语，后者才考虑加自动预检索。先量出来是哪个，再改。
 
 ---
 
-## 10. 已知风险
+## 11. 已知风险
 
 | 风险 | 缓解 |
 |---|---|
-| 模型不调 `memory_recall`（silent failure） | 常驻索引 + §9 埋点。数据说话，不预先加自动检索。 |
+| 模型不调 `memory_recall`（silent failure） | 常驻索引 + §10 埋点。数据说话，不预先加自动检索。 |
 | 索引膨胀吃 context | 600 token 硬预算 + 截断 + `/mneme-stats` 监控 |
 | 记忆写得太碎或太水 | 一文件一结论、`exp` 强制"下次怎么办"、写入前查重 |
 | 陈旧记忆误导（论文 §5.2.2 的 stability-plasticity） | `supersedes` 链 + `updated` 时间戳进索引行 |
 | 项目层记忆进 git 泄露隐私 | user 层强制在 `~/.pi/`，永不进 repo；`.cache/` 默认 gitignore |
-| flat 结构在多跳问题上召回不足 | §9 指标恶化时才上向量/图，打分函数已是单一入口 |
+| flat 结构在多跳问题上召回不足 | §10 指标恶化时才上向量/图，打分函数已是单一入口 |
