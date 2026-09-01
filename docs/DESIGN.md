@@ -70,49 +70,117 @@ pi 的长期记忆扩展。让 pi 跨会话记住三件事：**你是谁**（偏
 
 唯一的非法组合是 `project` × `user`：关于你的事实永远属于 L1，永远不进 repo。工具层校验并给出明确报错，不静默改写。
 
-判断规则写进 tool description：
-- `env` vs `exp`：**这个世界本来就是这样** → `env`；**我们试过才知道，下次要换个做法** → `exp`
-- `global` vs `project`：换个 repo 仍然成立 → `global`
+### 3.1.2 `env` 和 `exp` 怎么分
 
-三个例子，正好覆盖三种典型：
-- `global` × `env` — *tokio 的 `block_in_place` 在 current_thread runtime 上会 panic*（库的属性，不是我们的经验）
-- `project` × `env` — *本项目 E2E 必须用 `PI_DIOXUS_AGENT_BIN` 指向 stub，否则要真 API key*
-- `project` × `exp` — *KDE Wayland 下程序设定窗口位置会静默失败，改用 kdotool*
+判据只有一条，且必须是可当场执行的：
 
-**为什么 `env` 和 `exp` 必须分开**：`exp` 强制要求"下次怎么办"这一段（§3.2）。一条纯事实写不出这段，硬凑只会污染记忆质量。这条约束是 `env`/`exp` 分类的实际判据——写不出行动项，说明它是 `env`。
+> **能不能靠读代码、查文档、跑一条命令来核实？**
+> 能 → `env`（一条可验证的陈述）
+> 核实不了、只能相信我们试过 → `exp`（一个权衡后的选择）
+
+不要用"是不是我们试出来的"来分——几乎每条记忆都是试出来的，这个轴分不开任何东西。
+
+四个例子：
+
+| | 记忆 | 怎么核实 |
+|---|---|---|
+| `global` × `env` | tokio 的 `block_in_place` 在 current_thread runtime 上会 panic | 查 tokio 文档 |
+| `global` × `exp` | 这类 runtime 冲突优先改调用方的 runtime 类型，不要包 `spawn_blocking` 绕 | 无法核实，是取舍 |
+| `project` × `env` | E2E 必须用 `PI_DIOXUS_AGENT_BIN` 指向 stub，否则要真 API key | 读 `src/agent/process.rs` |
+| `project` × `exp` | 窗口定位改走 kdotool + KWin 脚本，没选"让断言不依赖绝对坐标" | 无法核实，是取舍 |
+
+**为什么值得分成两个 kind**：`env` 天生可自动核对——`/mneme-gc` 可以重跑那条命令、grep 那个文件，判定记忆是否已陈旧（对应论文 §5.2.2 的 stability-plasticity 问题，在这类记忆上是可自动化的）。`exp` 没有这条路，只能靠你判断。混成一个 kind，这条自动化路径就没了。
+
+**分不清时的兜底**：说明它是两条记忆被塞进了一条。拆开——一半是可核实的事实，另一半是我们的选择。这也是 §3.2"一文件 = 一条结论"约束的实际用法。
+
+举个真实的例子：*"KDE Wayland 下程序设定窗口位置会静默失败，改用 kdotool"* 读起来像一条，其实是两条：前半句可以查 Wayland 协议文档核实（`env`），后半句是我们在两个方案里选了一个（`exp`，另一个选项是让断言不依赖绝对坐标）。拆开之后，前者未来可以自动查陈旧，后者进索引时会带上"为什么没选另一个"。
 
 `pi-dioxus/docs/memory/` 里已有的手写笔记正好是 L2 `env/` 的内容，迁移即可。
 
 ### 3.2 记忆文件格式
 
-`<repo>/.pi/mneme/exp/kde-wayland-window-positioning.md`：
+承 §3.1.2，同一件事拆成两个文件。
+
+`<repo>/.pi/mneme/env/wayland-no-window-positioning.md`：
 
 ```markdown
 ---
-id: kde-wayland-window-positioning
-kind: exp
-title: KDE Wayland 下无法用程序设定窗口位置
+id: wayland-no-window-positioning
+kind: env
+title: Wayland 不暴露窗口坐标设定，KDE 下 set_outer_position 静默失败
 created: 2026-08-31
 updated: 2026-08-31
 hits: 0
 last_hit: null
 status: active            # active | superseded | archived
 supersedes: null
-tags: [kde, wayland, e2e, screenshot]
+verify:
+  kind: url
+  ref: https://wayland.freedesktop.org/docs/html/
+  expect: xdg-shell 里没有窗口定位请求
+tags: [kde, wayland, winit]
 ---
 
-Wayland 协议不暴露窗口坐标设定，`set_outer_position` 在 KDE 下静默失败，
-E2E 截图因此拿到错位的窗口。
+Wayland 协议里没有"把窗口放到 (x, y)"这种请求。winit 的 `set_outer_position`
+在 KDE 下不报错、也不生效，E2E 截图因此拿到错位的窗口。
+```
 
-**下次怎么办：** 用 `kdotool` 通过 KWin 脚本接口移动窗口，或让 E2E
-断言不依赖绝对坐标。见 [[e2e-screenshot-harness]]。
+`<repo>/.pi/mneme/exp/e2e-window-positioning-via-kdotool.md`：
+
+```markdown
+---
+id: e2e-window-positioning-via-kdotool
+kind: exp
+title: E2E 窗口定位走 kdotool，没选"断言不依赖绝对坐标"
+created: 2026-08-31
+updated: 2026-08-31
+hits: 0
+last_hit: null
+status: active
+supersedes: null
+tags: [e2e, screenshot, kdotool]
+---
+
+因为 [[wayland-no-window-positioning]]，E2E 无法自己摆窗口。两个可行方案：
+用 `kdotool` 通过 KWin 脚本接口移动，或让断言完全不依赖绝对坐标。选了前者，
+因为后者要重写全部截图基线。
+
+**下次怎么办：** 沿用 kdotool。如果哪天基线本来就要重做，再考虑换第二个方案。
 ```
 
 约束：
-- 一个文件 = 一条记忆 = 一个可独立成立的结论。正文控制在 ~200 字以内，超了就该拆。
-- `exp` 类必须有"下次怎么办"这一段。只描述现象不给行动的记忆，召回了也没用。
+- 一个文件 = 一条记忆 = 一个可独立成立的结论。正文 ~200 字以内，超了通常说明该拆。
+- `exp` 必须有"下次怎么办"。只描述现象不给行动的记忆，召回了也没用。
+- `exp` 应写出**没选的那个方案**。少了它，将来条件变化时你无法判断这个选择还成不成立。
+- `env` 应有 `verify:`，见 §3.2.1。写不出 `verify` 的，多半不是 `env`。
 - `id` 即文件名（不含 `.md`），kebab-case，全局唯一。
 - `[[id]]` 是软链接，指向不存在的 id 不是错误——它标记了一条还没写的记忆。
+
+### 3.2.1 `verify` 字段
+
+`env` 记忆的核实方法。结构化而非自由文本，因为 `/mneme-gc` 要能直接执行它（§7）。
+
+```yaml
+verify:
+  kind: file            # file | command | url
+  ref: src/agent/process.rs
+  expect: PI_DIOXUS_AGENT_BIN
+```
+
+| `kind` | `ref` | `expect` | GC 能否自动跑 |
+|---|---|---|---|
+| `file` | 仓库内相对路径 | 文件里必须仍能找到的子串 | ✅ |
+| `command` | 一条只读命令 | 输出里必须仍能匹配的子串 | ✅ |
+| `url` | 文档链接 | 一句人话，说明该在那页看到什么 | ❌ 只能提醒你人工看 |
+
+两条硬约束：
+
+- **`ref` 不写行号。** `process.rs:22` 在下一次编辑后就是错的，定位交给 `expect`。
+- **`expect` 不能省。** 只判断"文件还在"几乎永远为真，抓不到任何陈旧；判断"那个环境变量名还在"才能抓到把它重命名掉的那次重构——这才是这个字段存在的理由。
+
+`command` 必须是只读的（`grep` / `cat` / `--version` / `--help` 这类）。GC 会在你面前逐条跑，但它不该有能力改你的工作区。
+
+**为什么没有单独的"来源"字段**：来源和核实方法多数时候是同一个东西，分成两个字段必然漂移。两者确实分叉时（例：某个 panic 是线上崩了才知道的，但核实要查文档），存**核实方法**——记忆系统的失败模式是陈旧而不是溯源，"当时为什么信"帮不上 GC 的忙。
 
 ### 3.3 索引 MEMORY.md
 
@@ -167,7 +235,15 @@ Type.Object({
   }),
   id: Type.String({ description: "kebab-case, unique. e.g. tokio-block-in-place-panics" }),
   title: Type.String({ description: "One line. This is what shows up in the index — make it a claim, not a topic." }),
-  body: Type.String({ description: "The memory. For kind=exp, must end with what to do next time." }),
+  body: Type.String({
+    description:
+      "The memory. For kind=exp, must end with what to do next time, and should name the option you did not take.",
+  }),
+  verify: Type.Optional(Type.Object({
+    kind: Type.Union([Type.Literal("file"), Type.Literal("command"), Type.Literal("url")]),
+    ref: Type.String({ description: "Repo-relative path (no line number), a read-only command, or a doc URL." }),
+    expect: Type.String({ description: "Substring that must still be found in the file or command output." }),
+  }, { description: "kind=env only. How to confirm this is still true. See §3.2.1." })),
   tags: Type.Optional(Type.Array(Type.String())),
   links: Type.Optional(Type.Array(Type.String(), { description: "ids of related memories" })),
 })
@@ -245,7 +321,7 @@ v1 不引入 embedding，理由是三层记忆的规模在几百条量级，且�
 
 ```
 score = bm25(query, title*3 + body + tags*2)
-      * kindBoost          // 显式指定 kind 时非匹配项 *0.3
+      * kindBoost          // 显式指定 kind 时非匹配项 *0.6（软偏好，不是过滤）
       * scopeBoost         // project 1.0, global 0.9（当前 repo 的知识优先）
       * recencyBoost       // 1 + 0.2 * exp(-age_days / 90)
       * hitBoost           // 1 + 0.1 * log(1 + hits)，论文 §5.2.3 的 frequency 信号
@@ -261,9 +337,10 @@ score = bm25(query, title*3 + body + tags*2)
 
 `/mneme-gc` 是唯一的批量整理入口，由你手动触发：
 
-1. 列出候选：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）、正文高度相似的对、指向不存在 id 的 `[[链接]]`、`status != active` 但仍在索引里的条目。
-2. 逐条问你：保留 / 归档 / 合并。
-3. 重建 MEMORY.md 和 `.cache/`。
+1. 列出候选：`hits == 0 且 age > 90d`（论文 §5.2.3 的 time + frequency 信号）、正文高度相似的对、指向不存在 id 的 `[[链接]]`、`status != active` 但仍在索引里的条目、缺 `verify:` 的 `env` 条目。
+2. **`env` 陈旧检查**（§3.2.1）：`kind: file` 和 `kind: command` 的条目自动跑一遍，`expect` 匹配不上就标为待核，把记忆正文和实际结果并排给你看；`kind: url` 单独归一组，只提醒你人工看。这是 `env` / `exp` 分开的直接收益——`exp` 是取舍，没有客观的"还成不成立"可查，只能靠你。
+3. 逐条问你：保留 / 归档 / 合并 / 改用 `memory_revise`。
+4. 重建 MEMORY.md 和 `.cache/`。
 
 不自动跑。论文 §7.8 提倡的离线 consolidation（"睡眠"）能力更强，但它会花你没预算的 token 并改你没看过的文件——留到 M3 作为 opt-in。
 
