@@ -558,6 +558,19 @@ pi.on("context", async (event) => ({
 
 v1 不引入 embedding，理由是三层记忆的规模在几百条量级，且引入向量就要引入模型依赖、缓存失效、维度迁移一整套问题，收益未经验证。
 
+### 分词
+
+BM25 的中文分词使用 [`nodejieba`](https://github.com/yanyiwu/nodejieba) 的 `cutForSearch()`，索引文本和查询走完全相同的管线：
+
+1. Unicode NFKC 规范化并转小写；
+2. `nodejieba.cutForSearch()` 产生适合搜索的中文词元；v1 使用默认词典，不维护用户词典；
+3. 另行提取代码标识符：`_`、`-`、`::`、`/`、`.` 等分隔符既保留完整 token，也产生拆分 token。例如 `tokio::block_in_place` 同时产生完整形式、`tokio`、`block_in_place`、`block`、`in`、`place`；
+4. 去掉纯空白和标点，不做 stemming、同义词扩展或语言检测。
+
+`nodejieba` 是 C++ 原生扩展，要求 Node.js ≥ 18；安装时优先下载预编译二进制，没有对应平台产物时需要本机构建工具链。扩展加载失败就明确报错，不静默退回空白分词——后者会让中文召回看似可用、实际失效。
+
+`.cache/` 除 `source_hash` 外还保存 `tokenizer_version`，由本扩展的分词 schema 版本和 `nodejieba` 包版本共同组成；任一版本变化都强制重建索引。M1 的检索测试必须覆盖中文、英文、中英混合、snake_case、kebab-case 和路径。
+
 打分（论文 §5.3.3 的 lexical + §5.3.4 的 re-ranking）：
 
 ```
@@ -655,6 +668,7 @@ pi-mneme/
       entry.ts          # frontmatter 读写、id 校验
       index-file.ts     # MEMORY.md 渲染
     retrieval/
+      tokenize.ts         # nodejieba + 代码标识符分词
       bm25.ts
       score.ts          # 单一打分入口
       cache.ts
