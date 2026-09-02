@@ -15,7 +15,7 @@ pi install /path/to/pi-mneme
 Or try it for one run:
 
 ```bash
-pi -e /path/to/pi-mneme/src/index.ts
+pi -e /path/to/pi-mneme/index.ts
 ```
 
 ## Layout

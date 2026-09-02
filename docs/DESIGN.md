@@ -321,8 +321,9 @@ URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面�
 
 ```text
 pi-mneme/
+  index.ts                       # Pi package 入口（使扩展显示为 pi-mneme）
   src/
-    index.ts                     # 扩展入口：事件、工具与命令注册
+    index.ts                     # 扩展实现：事件、工具与命令注册
     mneme.ts                     # 全局与项目 store 的组合视图和写入操作
     store/
       paths.ts
