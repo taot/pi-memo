@@ -322,12 +322,14 @@ URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面�
 ```text
 pi-mneme/
   src/
-    index.ts
+    index.ts                     # 扩展入口：事件、工具与命令注册
+    mneme.ts                     # 全局与项目 store 的组合视图和写入操作
     store/
       paths.ts
       entry.ts
       usage.ts
       index-file.ts
+      lock.ts                    # 单写者锁
     retrieval/
       tokenize.ts
       bm25.ts
@@ -338,6 +340,7 @@ pi-mneme/
       write.ts
       revise.ts
       forget.ts
+      format.ts                  # 工具输出的条目渲染
     commands/
       gc.ts
       stats.ts
