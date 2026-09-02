@@ -5,6 +5,7 @@ edit by hand, diff and commit. The model stores and retrieves them through expli
 every session starts with a small index of what is remembered.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the design and its mapping to the memory survey it follows.
+The proposed evaluation protocol is in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Install
 
