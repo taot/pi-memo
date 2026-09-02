@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { MnemeError } from "../src/mneme.ts";
+import { MemoError } from "../src/memo.ts";
 import { createSandbox, memoryFile, seedEntry, type Sandbox } from "./helpers.ts";
 
 let sandbox: Sandbox;
@@ -12,8 +12,8 @@ beforeEach(() => {
 
 describe("write", () => {
 	it("stores a project memory and updates MEMORY.md", () => {
-		const mneme = sandbox.load();
-		const entry = mneme.write({
+		const memo = sandbox.load();
+		const entry = memo.write({
 			scope: "project",
 			kind: "env",
 			id: "build-and-check",
@@ -30,24 +30,24 @@ describe("write", () => {
 	});
 
 	it("refuses user memories in the project store", () => {
-		const mneme = sandbox.load();
+		const memo = sandbox.load();
 		expect(() =>
-			mneme.write({ scope: "project", kind: "user", id: "likes-tabs", title: "偏好 tab 缩进", body: "always tabs" }),
-		).toThrow(MnemeError);
+			memo.write({ scope: "project", kind: "user", id: "likes-tabs", title: "偏好 tab 缩进", body: "always tabs" }),
+		).toThrow(MemoError);
 	});
 
 	it("refuses a duplicate id in the other scope", () => {
-		const mneme = sandbox.load();
-		mneme.write({ scope: "global", kind: "exp", id: "shared-id", title: "global entry", body: "one" });
-		expect(() => mneme.write({ scope: "project", kind: "exp", id: "shared-id", title: "project entry", body: "two" })).toThrow(
+		const memo = sandbox.load();
+		memo.write({ scope: "global", kind: "exp", id: "shared-id", title: "global entry", body: "one" });
+		expect(() => memo.write({ scope: "project", kind: "exp", id: "shared-id", title: "project entry", body: "two" })).toThrow(
 			/already exists/,
 		);
 	});
 
 	it("refuses a project-relative verify file on a global memory", () => {
-		const mneme = sandbox.load();
+		const memo = sandbox.load();
 		expect(() =>
-			mneme.write({
+			memo.write({
 				scope: "global",
 				kind: "env",
 				id: "global-file-ref",
@@ -59,51 +59,51 @@ describe("write", () => {
 	});
 
 	it("flags near-duplicate titles instead of silently adding one", () => {
-		const mneme = sandbox.load();
-		mneme.write({ scope: "project", kind: "exp", id: "e2e-window", title: "E2E 窗口定位使用 kdotool", body: "one" });
-		expect(mneme.similarTitles("E2E 窗口定位使用 kdotool").map((hit) => hit.entry.id)).toEqual(["e2e-window"]);
+		const memo = sandbox.load();
+		memo.write({ scope: "project", kind: "exp", id: "e2e-window", title: "E2E 窗口定位使用 kdotool", body: "one" });
+		expect(memo.similarTitles("E2E 窗口定位使用 kdotool").map((hit) => hit.entry.id)).toEqual(["e2e-window"]);
 	});
 });
 
 describe("recall", () => {
 	it("finds a memory by query and counts the hit", () => {
-		const mneme = sandbox.load();
-		mneme.write({
+		const memo = sandbox.load();
+		memo.write({
 			scope: "project",
 			kind: "env",
 			id: "wayland-no-window-positioning",
 			title: "Wayland 不暴露窗口坐标设定",
 			body: "winit 的 set_outer_position 在 KDE 下不生效。",
 		});
-		mneme.write({ scope: "project", kind: "exp", id: "prefer-vitest", title: "测试使用 vitest", body: "npm run test" });
+		memo.write({ scope: "project", kind: "exp", id: "prefer-vitest", title: "测试使用 vitest", body: "npm run test" });
 
-		const hits = mneme.search("set_outer_position 窗口");
+		const hits = memo.search("set_outer_position 窗口");
 		expect(hits[0]?.entry.id).toBe("wayland-no-window-positioning");
 
-		mneme.noteHit(hits[0]!.entry);
-		mneme.flushUsage();
+		memo.noteHit(hits[0]!.entry);
+		memo.flushUsage();
 		const usage = JSON.parse(readFileSync(path.join(sandbox.projectDir, ".local", "usage.json"), "utf8"));
 		expect(usage["wayland-no-window-positioning"].hits).toBe(1);
 	});
 
 	it("prefers the requested kind", () => {
-		const mneme = sandbox.load();
-		mneme.write({ scope: "project", kind: "env", id: "cache-env", title: "cache directory layout", body: "cache lives here" });
-		mneme.write({ scope: "project", kind: "exp", id: "cache-exp", title: "cache directory layout", body: "cache lives here" });
-		expect(mneme.search("cache directory", { kind: "exp" })[0]?.entry.id).toBe("cache-exp");
+		const memo = sandbox.load();
+		memo.write({ scope: "project", kind: "env", id: "cache-env", title: "cache directory layout", body: "cache lives here" });
+		memo.write({ scope: "project", kind: "exp", id: "cache-exp", title: "cache directory layout", body: "cache lives here" });
+		expect(memo.search("cache directory", { kind: "exp" })[0]?.entry.id).toBe("cache-exp");
 	});
 
 	it("sees writes made in the same session", () => {
-		const mneme = sandbox.load();
-		mneme.write({ scope: "global", kind: "user", id: "prefers-chinese", title: "用户偏好中文回复", body: "回答用中文。" });
-		expect(mneme.search("中文回复")[0]?.entry.id).toBe("prefers-chinese");
+		const memo = sandbox.load();
+		memo.write({ scope: "global", kind: "user", id: "prefers-chinese", title: "用户偏好中文回复", body: "回答用中文。" });
+		expect(memo.search("中文回复")[0]?.entry.id).toBe("prefers-chinese");
 	});
 });
 
 describe("revise and forget", () => {
 	it("keeps created and clears optional fields with null", () => {
-		const mneme = sandbox.load();
-		const first = mneme.write({
+		const memo = sandbox.load();
+		const first = memo.write({
 			scope: "project",
 			kind: "env",
 			id: "revise-me",
@@ -113,7 +113,7 @@ describe("revise and forget", () => {
 			verify: { kind: "file", ref: "package.json", expect: "name" },
 		});
 
-		const revised = mneme.revise({ id: "revise-me", title: "new title", verify: null, tags: null });
+		const revised = memo.revise({ id: "revise-me", title: "new title", verify: null, tags: null });
 		expect(revised.created).toBe(first.created);
 		expect(revised.title).toBe("new title");
 		expect(revised.body).toBe("old body");
@@ -126,22 +126,22 @@ describe("revise and forget", () => {
 	});
 
 	it("deletes the file, the index line and the usage record", () => {
-		const mneme = sandbox.load();
-		const entry = mneme.write({ scope: "project", kind: "exp", id: "gone-soon", title: "temporary", body: "text" });
-		mneme.noteHit(entry);
-		mneme.flushUsage();
+		const memo = sandbox.load();
+		const entry = memo.write({ scope: "project", kind: "exp", id: "gone-soon", title: "temporary", body: "text" });
+		memo.noteHit(entry);
+		memo.flushUsage();
 
-		mneme.forget("gone-soon");
+		memo.forget("gone-soon");
 		expect(existsSync(entry.file)).toBe(false);
 		expect(readFileSync(path.join(sandbox.projectDir, "MEMORY.md"), "utf8")).not.toContain("gone-soon");
 		const usage = JSON.parse(readFileSync(path.join(sandbox.projectDir, ".local", "usage.json"), "utf8"));
 		expect(usage["gone-soon"]).toBeUndefined();
-		expect(mneme.search("temporary")).toEqual([]);
+		expect(memo.search("temporary")).toEqual([]);
 	});
 
 	it("reports an unknown id", () => {
-		const mneme = sandbox.load();
-		expect(() => mneme.forget("never-existed")).toThrow(/no memory with id/);
+		const memo = sandbox.load();
+		expect(() => memo.forget("never-existed")).toThrow(/no memory with id/);
 	});
 });
 
@@ -150,14 +150,14 @@ describe("id conflicts", () => {
 		seedEntry(sandbox.globalDir, "env", "twice", memoryFile({ id: "twice", kind: "env", title: "global copy", body: "a" }));
 		seedEntry(sandbox.projectDir, "env", "twice", memoryFile({ id: "twice", kind: "env", title: "project copy", body: "b" }));
 
-		const mneme = sandbox.load();
-		expect(mneme.conflicts.has("twice")).toBe(true);
-		expect(mneme.entries().map((entry) => entry.id)).not.toContain("twice");
-		expect(() => mneme.locate("twice")).toThrow(/more than one memory file/);
-		expect(() => mneme.forget("twice")).toThrow(/more than one memory file/);
-		expect(() => mneme.write({ scope: "project", kind: "env", id: "twice", title: "another", body: "c" })).toThrow(
+		const memo = sandbox.load();
+		expect(memo.conflicts.has("twice")).toBe(true);
+		expect(memo.entries().map((entry) => entry.id)).not.toContain("twice");
+		expect(() => memo.locate("twice")).toThrow(/more than one memory file/);
+		expect(() => memo.forget("twice")).toThrow(/more than one memory file/);
+		expect(() => memo.write({ scope: "project", kind: "env", id: "twice", title: "another", body: "c" })).toThrow(
 			/more than one memory file/,
 		);
-		expect(mneme.sessionIndex()).toContain("Conflicting ids");
+		expect(memo.sessionIndex()).toContain("Conflicting ids");
 	});
 });

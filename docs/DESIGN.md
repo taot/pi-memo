@@ -1,4 +1,4 @@
-# pi-mneme 设计
+# pi-memo 设计
 
 pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、项目环境事实和可复用经验，并在不同会话间提供检索。
 
@@ -45,7 +45,7 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
 ## 4. 存储
 
 ```text
-~/.pi/mneme/                     # 全局记忆
+~/.pi/memo/                     # 全局记忆
   user/*.md
   env/*.md
   exp/*.md
@@ -53,7 +53,7 @@ pi 的长期记忆扩展。它用人类可读的 Markdown 保存用户信息、�
   .cache/                        # 可重建的检索缓存
   .local/usage.json              # 本机使用统计
 
-<repo>/.pi/mneme/                # 项目记忆
+<repo>/.pi/memo/                # 项目记忆
   env/*.md
   exp/*.md
   MEMORY.md
@@ -126,7 +126,7 @@ verify:
 - [e2e-window-positioning-via-kdotool](exp/e2e-window-positioning-via-kdotool.md) — E2E 窗口定位使用 kdotool
 ```
 
-每行只包含 id 和 title。索引由 `/mneme-gc` 或 session 启动时重建；`memory_write`、`memory_revise` 和 `memory_forget` 也会在操作成功后立即更新索引。索引不手工编辑。
+每行只包含 id 和 title。索引由 `/memo-gc` 或 session 启动时重建；`memory_write`、`memory_revise` 和 `memory_forget` 也会在操作成功后立即更新索引。索引不手工编辑。
 
 ## 5. 工具
 
@@ -294,9 +294,9 @@ score = bm25(query, title*3 + body + tags*2)
 
 `.cache/` 保存倒排索引、源文件哈希和 tokenizer 版本，均可从记忆文件重建。
 
-## 8. `/mneme-gc`
+## 8. `/memo-gc`
 
-`/mneme-gc` 由用户手动触发，依次执行：
+`/memo-gc` 由用户手动触发，依次执行：
 
 1. 检查记忆文件格式和 id 冲突；发现 global 内部、project 内部或 global 与 project 之间的冲突时立即报错，列出冲突路径并提示用户手工解决。
 2. 执行 `env.verify` 检查。
@@ -305,11 +305,11 @@ score = bm25(query, title*3 + body + tags*2)
 5. 重建 `MEMORY.md` 和 `.cache/`。
 6. 将结果写入 `<store>/GC-REPORT.md`。
 
-发现 id 冲突时 `/mneme-gc` 在执行后续步骤以及写入报告、索引或缓存之前终止。没有冲突时，报告只给出候选项和建议，不修改或删除记忆；处理结果由模型调用 `memory_revise` 或 `memory_forget` 落盘。
+发现 id 冲突时 `/memo-gc` 在执行后续步骤以及写入报告、索引或缓存之前终止。没有冲突时，报告只给出候选项和建议，不修改或删除记忆；处理结果由模型调用 `memory_revise` 或 `memory_forget` 落盘。
 
-URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面正文做内容检查；无 UI 且未显式指定时跳过内容检查。
+URL 默认只检查 HTTP 状态。`/memo-gc --check-urls=true` 才抓取页面正文做内容检查；无 UI 且未显式指定时跳过内容检查。
 
-## 9. `/mneme-stats`
+## 9. `/memo-stats`
 
 输出：
 
@@ -320,11 +320,11 @@ URL 默认只检查 HTTP 状态。`/mneme-gc --check-urls=true` 才抓取页面�
 ## 10. 代码结构与阶段
 
 ```text
-pi-mneme/
-  index.ts                       # Pi package 入口（使扩展显示为 pi-mneme）
+pi-memo/
+  index.ts                       # Pi package 入口（使扩展显示为 pi-memo）
   src/
     index.ts                     # 扩展实现：事件、工具与命令注册
-    mneme.ts                     # 全局与项目 store 的组合视图和写入操作
+    memo.ts                     # 全局与项目 store 的组合视图和写入操作
     store/
       paths.ts
       entry.ts
@@ -352,7 +352,7 @@ pi-mneme/
 |---|---|---|
 | M0 | store、`memory_write`、按 ids 召回的 `memory_recall`、索引注入 | 新会话能从索引取得 id，并按 ids 召回已写入的记忆 |
 | M1 | 按 query 检索的 `memory_recall`、`memory_revise`、`memory_forget`、BM25、缓存 | 记忆变更立即更新索引和缓存，同一会话的检索结果正确 |
-| M2 | `/mneme-gc`、`/mneme-stats` | 连续使用两周并检查报告和指标 |
+| M2 | `/memo-gc`、`/memo-stats` | 连续使用两周并检查报告和指标 |
 
 ## 11. 已知风险
 

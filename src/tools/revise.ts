@@ -1,7 +1,7 @@
 /** `memory_revise`: update a memory in place. */
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Mneme } from "../mneme.ts";
+import type { Memo } from "../memo.ts";
 import type { Verify } from "../store/entry.ts";
 import { summarizeEntry } from "./format.ts";
 
@@ -36,7 +36,7 @@ interface ReviseInput {
 	tags?: string[] | null;
 }
 
-export function createReviseTool(getMneme: () => Mneme): ToolDefinition {
+export function createReviseTool(getMemo: () => Memo): ToolDefinition {
 	return {
 		name: "memory_revise",
 		label: "Revise memory",
@@ -50,7 +50,7 @@ export function createReviseTool(getMneme: () => Mneme): ToolDefinition {
 		parameters: ReviseParams,
 		async execute(_toolCallId, rawParams) {
 			const params = rawParams as ReviseInput;
-			const entry = getMneme().revise({
+			const entry = getMemo().revise({
 				id: params.id,
 				...(params.title !== undefined ? { title: params.title } : {}),
 				...(params.body !== undefined ? { body: params.body } : {}),

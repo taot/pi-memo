@@ -1,4 +1,4 @@
-# pi-mneme
+# pi-memo
 
 Long-term memory for [pi](https://pi.dev). Memories are plain Markdown files you can read,
 edit by hand, diff and commit. The model stores and retrieves them through explicit tools;
@@ -9,27 +9,27 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the design and its mapping to the memor
 ## Install
 
 ```bash
-pi install /path/to/pi-mneme
+pi install /path/to/pi-memo
 ```
 
 Or try it for one run:
 
 ```bash
-pi -e /path/to/pi-mneme/index.ts
+pi -e /path/to/pi-memo/index.ts
 ```
 
 ## Layout
 
 ```text
-~/.pi/mneme/          user/ env/ exp/ + MEMORY.md   # global memory
-<repo>/.pi/mneme/     env/ exp/ + MEMORY.md         # project memory, committed with the repo
+~/.pi/memo/          user/ env/ exp/ + MEMORY.md   # global memory
+<repo>/.pi/memo/     env/ exp/ + MEMORY.md         # project memory, committed with the repo
 ```
 
 `.cache/` (retrieval index) and `.local/` (usage stats) are rebuildable; keep them out of git:
 
 ```gitignore
-.pi/mneme/.cache/
-.pi/mneme/.local/
+.pi/memo/.cache/
+.pi/memo/.local/
 ```
 
 Each memory is one file holding one conclusion:
@@ -70,11 +70,11 @@ into context stays fixed until the next session.
 
 ## Commands
 
-- `/mneme-gc` — check formats and id conflicts, run `env.verify` checks, list possible
+- `/memo-gc` — check formats and id conflicts, run `env.verify` checks, list possible
   duplicates and entries not hit in 90 days, rebuild `MEMORY.md` and `.cache/`, and write
   `GC-REPORT.md` per store. It reports; it never edits. URLs are checked for HTTP status only
   unless you pass `--check-urls=true`.
-- `/mneme-stats` — entry counts by scope and kind, never-recalled ratio, and the size of the
+- `/memo-stats` — entry counts by scope and kind, never-recalled ratio, and the size of the
   injected index against its limits.
 
 An id that resolves to more than one memory file is excluded from the index and from every

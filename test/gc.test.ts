@@ -11,11 +11,11 @@ beforeEach(() => {
 	sandbox = createSandbox();
 });
 
-describe("/mneme-gc", () => {
+describe("/memo-gc", () => {
 	it("reports a failed file verification and writes a report", async () => {
 		writeFileSync(path.join(sandbox.projectRoot, "process.rs"), "fn main() {}\n", "utf8");
-		const mneme = sandbox.load();
-		mneme.write({
+		const memo = sandbox.load();
+		memo.write({
 			scope: "project",
 			kind: "env",
 			id: "agent-bin-env",
@@ -24,7 +24,7 @@ describe("/mneme-gc", () => {
 			verify: { kind: "file", ref: "process.rs", expect: "PI_DIOXUS_AGENT_BIN" },
 		});
 
-		const result = await runGc(mneme, { cwd: sandbox.projectRoot, checkUrls: false });
+		const result = await runGc(memo, { cwd: sandbox.projectRoot, checkUrls: false });
 		expect(result.aborted).toBe(false);
 		expect(result.verify[0]?.status).toBe("failed");
 
@@ -35,8 +35,8 @@ describe("/mneme-gc", () => {
 
 	it("passes a file verification that still matches", async () => {
 		writeFileSync(path.join(sandbox.projectRoot, "process.rs"), "let bin = PI_DIOXUS_AGENT_BIN;\n", "utf8");
-		const mneme = sandbox.load();
-		mneme.write({
+		const memo = sandbox.load();
+		memo.write({
 			scope: "project",
 			kind: "env",
 			id: "agent-bin-env",
@@ -44,21 +44,21 @@ describe("/mneme-gc", () => {
 			body: "text",
 			verify: { kind: "file", ref: "process.rs", expect: "PI_DIOXUS_AGENT_BIN" },
 		});
-		const result = await runGc(mneme, { cwd: sandbox.projectRoot, checkUrls: false });
+		const result = await runGc(memo, { cwd: sandbox.projectRoot, checkUrls: false });
 		expect(result.verify[0]?.status).toBe("ok");
 	});
 
 	it("checks a read-only command", async () => {
-		const mneme = sandbox.load();
-		mneme.write({
+		const memo = sandbox.load();
+		memo.write({
 			scope: "project",
 			kind: "env",
 			id: "echo-check",
 			title: "echo prints its argument",
 			body: "text",
-			verify: { kind: "command", ref: "echo mneme-ok", expect: "mneme-ok" },
+			verify: { kind: "command", ref: "echo memo-ok", expect: "memo-ok" },
 		});
-		const result = await runGc(mneme, { cwd: sandbox.projectRoot, checkUrls: false });
+		const result = await runGc(memo, { cwd: sandbox.projectRoot, checkUrls: false });
 		expect(result.verify[0]?.status).toBe("ok");
 	});
 
@@ -91,15 +91,15 @@ describe("/mneme-gc", () => {
 	});
 });
 
-describe("/mneme-stats", () => {
+describe("/memo-stats", () => {
 	it("counts entries, unused ratio and index size", () => {
-		const mneme = sandbox.load();
-		mneme.write({ scope: "project", kind: "env", id: "one", title: "first fact", body: "text" });
-		mneme.write({ scope: "global", kind: "user", id: "two", title: "user preference", body: "text" });
-		mneme.noteHit(mneme.locate("one")!.entry);
-		mneme.flushUsage();
+		const memo = sandbox.load();
+		memo.write({ scope: "project", kind: "env", id: "one", title: "first fact", body: "text" });
+		memo.write({ scope: "global", kind: "user", id: "two", title: "user preference", body: "text" });
+		memo.noteHit(memo.locate("one")!.entry);
+		memo.flushUsage();
 
-		const stats = runStats(mneme);
+		const stats = runStats(memo);
 		expect(stats.total).toBe(2);
 		expect(stats.unused).toBe(1);
 		expect(stats.indexEntries).toBe(2);

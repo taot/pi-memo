@@ -33,7 +33,7 @@ import { syncCache, tokenizeEntry } from "./retrieval/cache.ts";
 import { finalScore } from "./retrieval/score.ts";
 import { tokenize } from "./retrieval/tokenize.ts";
 
-export class MnemeError extends Error {}
+export class MemoError extends Error {}
 
 export interface StoreState {
 	scope: Scope;
@@ -79,7 +79,7 @@ export function titleSimilarity(a: string, b: string): number {
 
 export const SIMILAR_TITLE_THRESHOLD = 0.6;
 
-export class Mneme {
+export class Memo {
 	readonly cwd: string;
 	readonly stores: StoreState[] = [];
 	/** id -> files, for ids that resolve to more than one memory file. */
@@ -90,10 +90,10 @@ export class Mneme {
 		this.cwd = cwd;
 	}
 
-	static load(cwd: string): Mneme {
-		const mneme = new Mneme(cwd);
-		mneme.reload();
-		return mneme;
+	static load(cwd: string): Memo {
+		const memo = new Memo(cwd);
+		memo.reload();
+		return memo;
 	}
 
 	/** Re-read both stores from disk and refresh caches. */
@@ -138,7 +138,7 @@ export class Mneme {
 
 	store(scope: Scope): StoreState {
 		const found = this.stores.find((store) => store.scope === scope);
-		if (!found) throw new MnemeError(`no ${scope} memory store available`);
+		if (!found) throw new MemoError(`no ${scope} memory store available`);
 		return found;
 	}
 
@@ -186,7 +186,7 @@ export class Mneme {
 	assertNoConflict(id: string): void {
 		const files = this.conflicts.get(id);
 		if (files) {
-			throw new MnemeError(
+			throw new MemoError(
 				`id "${id}" resolves to more than one memory file (${files.join(", ")}). ` +
 					"Resolve the duplicate by hand; memory tools refuse to touch this id.",
 			);
@@ -251,21 +251,21 @@ export class Mneme {
 
 	write(params: WriteParams): Entry {
 		const { scope, kind, id, title, body } = params;
-		if (!isValidId(id)) throw new MnemeError(`id "${id}" must be kebab-case (a-z, 0-9, dashes)`);
-		if (!title.trim()) throw new MnemeError("title must not be empty");
-		if (!body.trim()) throw new MnemeError("body must not be empty");
+		if (!isValidId(id)) throw new MemoError(`id "${id}" must be kebab-case (a-z, 0-9, dashes)`);
+		if (!title.trim()) throw new MemoError("title must not be empty");
+		if (!body.trim()) throw new MemoError("body must not be empty");
 		if (!isKindAllowed(scope, kind)) {
-			throw new MnemeError(`kind "${kind}" is not allowed in the ${scope} store`);
+			throw new MemoError(`kind "${kind}" is not allowed in the ${scope} store`);
 		}
 		if (scope === "project" && !this.hasProjectStore()) {
-			throw new MnemeError("no project store available for this working directory");
+			throw new MemoError("no project store available for this working directory");
 		}
 		this.assertNoConflict(id);
 		validateVerify(scope, params.verify);
 
 		const existing = this.locate(id);
 		if (existing) {
-			throw new MnemeError(
+			throw new MemoError(
 				`id "${id}" already exists in the ${existing.entry.scope} store (${existing.entry.file}). ` +
 					"Use memory_revise to update it, or pick a different id.",
 			);
@@ -296,11 +296,11 @@ export class Mneme {
 
 	revise(params: ReviseParams): Entry {
 		const found = this.locate(params.id);
-		if (!found) throw new MnemeError(`no memory with id "${params.id}"`);
+		if (!found) throw new MemoError(`no memory with id "${params.id}"`);
 		const { entry, store } = found;
 
-		if (params.title !== undefined && !params.title.trim()) throw new MnemeError("title must not be empty");
-		if (params.body !== undefined && !params.body.trim()) throw new MnemeError("body must not be empty");
+		if (params.title !== undefined && !params.title.trim()) throw new MemoError("title must not be empty");
+		if (params.body !== undefined && !params.body.trim()) throw new MemoError("body must not be empty");
 		if (params.verify) validateVerify(entry.scope, params.verify);
 
 		const next: Entry = {
@@ -327,7 +327,7 @@ export class Mneme {
 
 	forget(id: string): Entry {
 		const found = this.locate(id);
-		if (!found) throw new MnemeError(`no memory with id "${id}"`);
+		if (!found) throw new MemoError(`no memory with id "${id}"`);
 		const { entry, store } = found;
 
 		withStoreLock(store.dir, () => {
@@ -389,13 +389,13 @@ export class Mneme {
 
 function validateVerify(scope: Scope, verify?: Verify | null): void {
 	if (!verify) return;
-	if (!verify.ref.trim()) throw new MnemeError("verify.ref must not be empty");
-	if (!verify.expect.trim()) throw new MnemeError("verify.expect must not be empty");
+	if (!verify.ref.trim()) throw new MemoError("verify.ref must not be empty");
+	if (!verify.expect.trim()) throw new MemoError("verify.expect must not be empty");
 	if (/:\d+$/.test(verify.ref) && verify.kind === "file") {
-		throw new MnemeError("verify.ref must not carry a line number");
+		throw new MemoError("verify.ref must not carry a line number");
 	}
 	if (scope === "global" && verify.kind === "file" && !/^([~/]|[A-Za-z]:[\\/])/.test(verify.ref)) {
-		throw new MnemeError(
+		throw new MemoError(
 			"a global memory must not verify against a project-relative file; use an absolute path or a different verify kind",
 		);
 	}

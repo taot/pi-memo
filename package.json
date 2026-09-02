@@ -1,5 +1,5 @@
 {
-  "name": "pi-mneme",
+  "name": "pi-memo",
   "version": "0.1.0",
   "description": "Long-term memory extension for the pi coding agent: readable Markdown memories with BM25 recall",
   "type": "module",

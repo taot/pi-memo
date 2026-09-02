@@ -1,6 +1,6 @@
 /** Drives the extension through a stubbed ExtensionAPI, without running pi. */
 import { beforeEach, describe, expect, it } from "vitest";
-import mnemeExtension from "../src/index.ts";
+import memoExtension from "../src/index.ts";
 import { createSandbox, type Sandbox } from "./helpers.ts";
 
 interface Registered {
@@ -54,19 +54,19 @@ beforeEach(() => {
 describe("extension wiring", () => {
 	it("registers the four memory tools and both commands", () => {
 		const { pi, registered } = stubPi();
-		mnemeExtension(pi);
+		memoExtension(pi);
 		expect([...registered.tools.keys()].sort()).toEqual([
 			"memory_forget",
 			"memory_recall",
 			"memory_revise",
 			"memory_write",
 		]);
-		expect([...registered.commands.keys()].sort()).toEqual(["mneme-gc", "mneme-stats"]);
+		expect([...registered.commands.keys()].sort()).toEqual(["memo-gc", "memo-stats"]);
 	});
 
 	it("injects the index snapshot and recalls what was written in the same session", async () => {
 		const { pi, registered } = stubPi();
-		mnemeExtension(pi);
+		memoExtension(pi);
 		const ctx = stubCtx(sandbox.projectRoot, registered);
 
 		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
@@ -92,14 +92,14 @@ describe("extension wiring", () => {
 		const contextHandler = (registered.handlers.get("context") ?? [])[0] as Function;
 		const result = await contextHandler({ messages: [{ role: "user", content: "hi", timestamp: 0 }] });
 		expect(result.messages).toHaveLength(2);
-		expect(result.messages[0].customType).toBe("mneme-index");
+		expect(result.messages[0].customType).toBe("memo-index");
 		expect(result.messages[0].content).toContain("build-and-check");
 		expect(result.messages[0].display).toBe(false);
 	});
 
 	it("rejects a recall that passes neither query nor ids", async () => {
 		const { pi, registered } = stubPi();
-		mnemeExtension(pi);
+		memoExtension(pi);
 		const ctx = stubCtx(sandbox.projectRoot, registered);
 		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
 
@@ -109,7 +109,7 @@ describe("extension wiring", () => {
 
 	it("flushes usage when the agent settles", async () => {
 		const { pi, registered } = stubPi();
-		mnemeExtension(pi);
+		memoExtension(pi);
 		const ctx = stubCtx(sandbox.projectRoot, registered);
 		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
 
@@ -119,25 +119,25 @@ describe("extension wiring", () => {
 		await registered.tools.get("memory_recall").execute("c2", { ids: ["lesson-one"] }, undefined, undefined, ctx);
 		for (const handler of registered.handlers.get("agent_settled") ?? []) await handler({}, ctx);
 
-		const stats = registered.commands.get("mneme-stats");
+		const stats = registered.commands.get("memo-stats");
 		await stats.handler("", ctx);
 		expect(registered.messages.at(-1)?.content).toContain("Never recalled: 0");
 		expect(registered.messages.at(-1)?.options).toBeUndefined();
 	});
 
-	it("runs /mneme-gc and reports through a message", async () => {
+	it("runs /memo-gc and reports through a message", async () => {
 		const { pi, registered } = stubPi();
-		mnemeExtension(pi);
+		memoExtension(pi);
 		const ctx = stubCtx(sandbox.projectRoot, registered);
 		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
 
 		await registered.tools
 			.get("memory_write")
 			.execute("c1", { scope: "project", kind: "env", id: "one-fact", title: "a fact", body: "text" }, undefined, undefined, ctx);
-		await registered.commands.get("mneme-gc").handler("", ctx);
+		await registered.commands.get("memo-gc").handler("", ctx);
 
-		expect(registered.messages.at(-1)?.customType).toBe("mneme-gc");
-		expect(registered.messages.at(-1)?.content).toContain("mneme GC: 1 entries checked");
+		expect(registered.messages.at(-1)?.customType).toBe("memo-gc");
+		expect(registered.messages.at(-1)?.content).toContain("memo GC: 1 entries checked");
 		expect(registered.messages.at(-1)?.options).toBeUndefined();
 	});
 });

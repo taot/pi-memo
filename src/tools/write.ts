@@ -1,7 +1,7 @@
 /** `memory_write`: store one new memory. */
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Mneme } from "../mneme.ts";
+import type { Memo } from "../memo.ts";
 import type { Verify } from "../store/entry.ts";
 import type { Kind, Scope } from "../store/paths.ts";
 import { summarizeEntry } from "./format.ts";
@@ -42,7 +42,7 @@ interface WriteInput {
 	tags?: string[];
 }
 
-export function createWriteTool(getMneme: () => Mneme): ToolDefinition {
+export function createWriteTool(getMemo: () => Memo): ToolDefinition {
 	return {
 		name: "memory_write",
 		label: "Write memory",
@@ -57,9 +57,9 @@ export function createWriteTool(getMneme: () => Mneme): ToolDefinition {
 		parameters: WriteParams,
 		async execute(_toolCallId, rawParams) {
 			const params = rawParams as WriteInput;
-			const mneme = getMneme();
+			const memo = getMemo();
 
-			const existing = mneme.locate(params.id);
+			const existing = memo.locate(params.id);
 			if (existing) {
 				throw new Error(
 					`id "${params.id}" already exists in the ${existing.entry.scope} store (${existing.entry.file}). ` +
@@ -67,7 +67,7 @@ export function createWriteTool(getMneme: () => Mneme): ToolDefinition {
 				);
 			}
 
-			const similar = mneme.similarTitles(params.title);
+			const similar = memo.similarTitles(params.title);
 			if (similar.length > 0) {
 				const list = similar.map((hit) => `- ${summarizeEntry(hit.entry)}`).join("\n");
 				return {
@@ -83,7 +83,7 @@ export function createWriteTool(getMneme: () => Mneme): ToolDefinition {
 				};
 			}
 
-			const entry = mneme.write({
+			const entry = memo.write({
 				scope: params.scope,
 				kind: params.kind,
 				id: params.id,

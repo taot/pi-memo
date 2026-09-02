@@ -1,5 +1,5 @@
 /**
- * `/mneme-gc`: check the stores, report candidates, rebuild index and cache.
+ * `/memo-gc`: check the stores, report candidates, rebuild index and cache.
  *
  * The report never edits or deletes memories. Acting on it is the model's job,
  * through `memory_revise` and `memory_forget`.
@@ -8,8 +8,8 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import type { Entry } from "../store/entry.ts";
-import type { Mneme, StoreState } from "../mneme.ts";
-import { titleSimilarity } from "../mneme.ts";
+import type { Memo, StoreState } from "../memo.ts";
+import { titleSimilarity } from "../memo.ts";
 import { findProjectRoot, reportFilePath } from "../store/paths.ts";
 import { nowIso } from "../store/entry.ts";
 
@@ -131,10 +131,10 @@ function findSimilar(entries: Entry[], threshold = 0.6): SimilarPair[] {
 	return pairs.sort((x, y) => y.similarity - x.similarity);
 }
 
-function findStale(mneme: Mneme, now: number): Entry[] {
+function findStale(memo: Memo, now: number): Entry[] {
 	const cutoff = now - STALE_DAYS * 86_400_000;
-	return mneme.entries().filter((entry) => {
-		const usage = mneme.usageOf(entry.id);
+	return memo.entries().filter((entry) => {
+		const usage = memo.usageOf(entry.id);
 		if (usage && usage.hits > 0) {
 			const last = Date.parse(usage.last_hit);
 			if (!Number.isNaN(last) && last >= cutoff) return false;
@@ -148,7 +148,7 @@ function findStale(mneme: Mneme, now: number): Entry[] {
 function renderReport(store: StoreState, result: Omit<GcResult, "reports" | "summary" | "aborted">): string {
 	const mine = <T extends { entry: Entry }>(items: T[]) => items.filter((item) => item.entry.scope === store.scope);
 	const lines = [
-		`# mneme GC report (${store.scope})`,
+		`# memo GC report (${store.scope})`,
 		"",
 		`Generated ${nowIso()}`,
 		`Store: ${store.dir}`,
@@ -197,44 +197,44 @@ function renderReport(store: StoreState, result: Omit<GcResult, "reports" | "sum
 	return lines.join("\n");
 }
 
-export async function runGc(mneme: Mneme, options: GcOptions): Promise<GcResult> {
-	mneme.reload();
+export async function runGc(memo: Memo, options: GcOptions): Promise<GcResult> {
+	memo.reload();
 
-	if (mneme.conflicts.size > 0) {
-		const detail = [...mneme.conflicts].map(([id, files]) => `- ${id}: ${files.join(", ")}`).join("\n");
+	if (memo.conflicts.size > 0) {
+		const detail = [...memo.conflicts].map(([id, files]) => `- ${id}: ${files.join(", ")}`).join("\n");
 		return {
 			aborted: true,
-			conflicts: mneme.conflicts,
-			problems: mneme.problems,
+			conflicts: memo.conflicts,
+			problems: memo.problems,
 			verify: [],
 			similar: [],
 			stale: [],
 			reports: [],
-			summary: `mneme GC stopped: ${mneme.conflicts.size} conflicting id(s). Resolve them by hand.\n${detail}`,
+			summary: `memo GC stopped: ${memo.conflicts.size} conflicting id(s). Resolve them by hand.\n${detail}`,
 		};
 	}
 
-	const entries = mneme.entries();
+	const entries = memo.entries();
 	const verify: VerifyResult[] = [];
 	for (const entry of entries) {
 		if (entry.kind !== "env") continue;
 		verify.push(await checkVerify(entry, options));
 	}
 	const similar = findSimilar(entries);
-	const stale = findStale(mneme, Date.now());
+	const stale = findStale(memo, Date.now());
 
 	const reports: string[] = [];
-	for (const store of mneme.stores) {
-		mneme.refresh(store);
+	for (const store of memo.stores) {
+		memo.refresh(store);
 		const file = reportFilePath(store.dir);
-		writeFileSync(file, renderReport(store, { conflicts: mneme.conflicts, problems: mneme.problems, verify, similar, stale }), "utf8");
+		writeFileSync(file, renderReport(store, { conflicts: memo.conflicts, problems: memo.problems, verify, similar, stale }), "utf8");
 		reports.push(file);
 	}
 
 	const failed = verify.filter((item) => item.status === "failed" || item.status === "error");
 	const summary = [
-		`mneme GC: ${entries.length} entries checked.`,
-		`- format problems: ${mneme.problems.length}`,
+		`memo GC: ${entries.length} entries checked.`,
+		`- format problems: ${memo.problems.length}`,
 		`- failed verify checks: ${failed.length}`,
 		`- possible duplicates: ${similar.length}`,
 		`- not hit in ${STALE_DAYS} days: ${stale.length}`,
@@ -242,7 +242,7 @@ export async function runGc(mneme: Mneme, options: GcOptions): Promise<GcResult>
 		options.checkUrls ? "- url content checked" : "- url checks: HTTP status only (--check-urls=true for content)",
 	].join("\n");
 
-	return { aborted: false, conflicts: mneme.conflicts, problems: mneme.problems, verify, similar, stale, reports, summary };
+	return { aborted: false, conflicts: memo.conflicts, problems: memo.problems, verify, similar, stale, reports, summary };
 }
 
 export function parseGcArgs(args: string): GcOptions["checkUrls"] {

@@ -1,31 +1,31 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { Mneme } from "../src/mneme.ts";
+import { Memo } from "../src/memo.ts";
 
 export interface Sandbox {
 	root: string;
 	globalDir: string;
 	projectRoot: string;
 	projectDir: string;
-	load(): Mneme;
+	load(): Memo;
 }
 
 /** A throwaway global store plus a fake repo with its own project store. */
 export function createSandbox(): Sandbox {
-	const root = mkdtempSync(path.join(tmpdir(), "mneme-test-"));
-	const globalDir = path.join(root, "global", "mneme");
+	const root = mkdtempSync(path.join(tmpdir(), "memo-test-"));
+	const globalDir = path.join(root, "global", "memo");
 	const projectRoot = path.join(root, "repo");
 	mkdirSync(path.join(projectRoot, ".git"), { recursive: true });
 	mkdirSync(globalDir, { recursive: true });
-	process.env.PI_MNEME_HOME = globalDir;
+	process.env.PI_MEMO_HOME = globalDir;
 
 	return {
 		root,
 		globalDir,
 		projectRoot,
-		projectDir: path.join(projectRoot, ".pi", "mneme"),
-		load: () => Mneme.load(projectRoot),
+		projectDir: path.join(projectRoot, ".pi", "memo"),
+		load: () => Memo.load(projectRoot),
 	};
 }
 

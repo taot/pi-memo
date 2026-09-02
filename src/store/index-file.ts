@@ -77,7 +77,7 @@ function snapshotOrder(entries: Entry[], usage: Map<string, UsageMap[string]>): 
 /** Render the fixed index snapshot injected at the head of the session context. */
 export function renderSessionIndex(input: SessionIndexInput): string {
 	const header = [
-		"# mneme memory index",
+		"# memo memory index",
 		"",
 		"Stored long-term memories. Titles are hooks, not content:",
 		"call memory_recall with `ids` for the full text of a listed entry, or with `query` to search everything.",

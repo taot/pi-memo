@@ -1,8 +1,8 @@
 /**
  * Store locations.
  *
- * Global memory lives in `~/.pi/mneme`, project memory in `<repo>/.pi/mneme`.
- * `PI_MNEME_HOME` overrides the global store (used by tests).
+ * Global memory lives in `~/.pi/memo`, project memory in `<repo>/.pi/memo`.
+ * `PI_MEMO_HOME` overrides the global store (used by tests).
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -24,9 +24,9 @@ export function isKindAllowed(scope: Scope, kind: Kind): boolean {
 }
 
 export function globalStoreDir(): string {
-	const override = process.env.PI_MNEME_HOME;
+	const override = process.env.PI_MEMO_HOME;
 	if (override && override.trim().length > 0) return path.resolve(override);
-	return path.join(homedir(), ".pi", "mneme");
+	return path.join(homedir(), ".pi", "memo");
 }
 
 /** Walk up from `cwd` looking for a repo root. Falls back to `cwd`. */
@@ -41,7 +41,7 @@ export function findProjectRoot(cwd: string): string {
 }
 
 export function projectStoreDir(cwd: string): string {
-	return path.join(findProjectRoot(cwd), ".pi", "mneme");
+	return path.join(findProjectRoot(cwd), ".pi", "memo");
 }
 
 export function kindDir(storeDir: string, kind: Kind): string {
