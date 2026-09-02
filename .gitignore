@@ -1,3 +1,4 @@
 node_modules/
 .pi/memo/.cache/
 .pi/memo/.local/
+data/
