@@ -7,7 +7,7 @@ interface Registered {
 	tools: Map<string, any>;
 	commands: Map<string, any>;
 	handlers: Map<string, Function[]>;
-	messages: { customType: string; content: string }[];
+	messages: { customType: string; content: string; options?: unknown }[];
 	notifications: string[];
 }
 
@@ -29,8 +29,8 @@ function stubPi(): { pi: any; registered: Registered } {
 		registerCommand(name: string, options: any) {
 			registered.commands.set(name, options);
 		},
-		async sendMessage(message: any) {
-			registered.messages.push(message);
+		async sendMessage(message: any, options?: unknown) {
+			registered.messages.push({ ...message, options });
 		},
 	};
 	return { pi, registered };
@@ -122,6 +122,7 @@ describe("extension wiring", () => {
 		const stats = registered.commands.get("mneme-stats");
 		await stats.handler("", ctx);
 		expect(registered.messages.at(-1)?.content).toContain("Never recalled: 0");
+		expect(registered.messages.at(-1)?.options).toBeUndefined();
 	});
 
 	it("runs /mneme-gc and reports through a message", async () => {
@@ -137,5 +138,6 @@ describe("extension wiring", () => {
 
 		expect(registered.messages.at(-1)?.customType).toBe("mneme-gc");
 		expect(registered.messages.at(-1)?.content).toContain("mneme GC: 1 entries checked");
+		expect(registered.messages.at(-1)?.options).toBeUndefined();
 	});
 });

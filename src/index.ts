@@ -95,10 +95,9 @@ export default function mnemeExtension(pi: ExtensionAPI): void {
 				// state, so recall still sees whatever GC rebuilt.
 				const result = await runGc(getMneme(), { cwd: ctx.cwd, checkUrls: parseGcArgs(args) });
 				ctx.ui.notify(result.aborted ? "mneme GC stopped: id conflicts" : "mneme GC done", result.aborted ? "warning" : "info");
-				await pi.sendMessage(
-					{ customType: "mneme-gc", content: result.summary, display: true },
-					{ deliverAs: "nextTurn" },
-				);
+				// No delivery mode: while idle, pi appends and renders the message
+				// immediately. `nextTurn` would defer it until the next prompt.
+				await pi.sendMessage({ customType: "mneme-gc", content: result.summary, display: true });
 			} catch (error) {
 				ctx.ui.notify(`mneme GC failed: ${(error as Error).message}`, "error");
 			}
@@ -110,10 +109,7 @@ export default function mnemeExtension(pi: ExtensionAPI): void {
 		handler: async (_args: string, ctx: ExtensionContext) => {
 			try {
 				const stats = runStats(getMneme());
-				await pi.sendMessage(
-					{ customType: "mneme-stats", content: stats.text, display: true },
-					{ deliverAs: "nextTurn" },
-				);
+				await pi.sendMessage({ customType: "mneme-stats", content: stats.text, display: true });
 			} catch (error) {
 				ctx.ui.notify(`mneme stats failed: ${(error as Error).message}`, "error");
 			}
