@@ -136,10 +136,23 @@ print('A:   ', f(open('runs/A/patch.diff').read()))
 gold 只动 `src/flask/blueprints.py` 一个文件；如果 agent 的 patch 还带上了
 `CHANGES.rst` 和测试文件，说明它抄了上游 commit。
 
+**它到底被告知了什么：**
+
+```bash
+node --experimental-strip-types dump_system_prompt.ts
+```
+
+pi 的系统提示由 `dist/core/system-prompt.js` 拼装：固定开头 + 每个工具的 `promptSnippet`
+一行 + Guidelines（内置几条 + 所有工具的 `promptGuidelines`）+ pi 文档路径 +
+`--append-system-prompt` + `<project_context>`（AGENTS.md/CLAUDE.md）+ skills + cwd。
+pi-memo 就活在中间那两段里。改过 `src/tools/*.ts` 的提示文案之后跑一下，
+确认 agent 看到的是你以为的那句话。
+
 ## 文件
 
 | 文件 | 作用 |
 |---|---|
+| `dump_system_prompt.ts` | 打印 agent 实际看到的系统提示（含 pi-memo 注入的工具行和 guideline）；零成本，不调 LLM |
 | `export_instance.py` | parquet → `instance.json` |
 | `prompt.py` | `instance.json` + arm → 提示词 |
 | `run.sh` | 建 workspace、隔离 store、跑 pi、抓 patch |
