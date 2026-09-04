@@ -13,6 +13,7 @@
 |---|---|
 | pi 已安装并配好鉴权 | `pi --version`，`~/.pi/agent/auth.json` 存在 |
 | python3 | `python3 --version` |
+| jq | `jq --version` |
 | 读 parquet 的 venv | `ls ../swe-contextbench/.venv/bin/python` |
 | 数据集 parquet | `ls ../swe-contextbench/data/*.parquet` |
 
