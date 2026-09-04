@@ -3,3 +3,5 @@ node_modules/
 .pi/memo/.local/
 data/
 .ipynb_checkpoints/
+eval/agent-smoke/repos/
+eval/agent-smoke/runs/
