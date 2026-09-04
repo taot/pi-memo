@@ -99,9 +99,24 @@ mkdir -p repos && git clone https://github.com/pallets/flask.git repos/flask
 | `trace.jsonl` | 完整事件流（`pi --mode json` 的输出） |
 | `patch.diff` | agent 改出来的代码，已排除 `.pi/`，可直接当 SWE-bench 的 `model_patch` |
 | `prompt.txt` | 实际发给 agent 的提示 |
+| `langfuse.txt` | 这次运行的 langfuse trace id 和 task run id |
 | `memo-global/` | 全局 store（隔离的） |
 | `workspace/.pi/memo/` | 项目 store |
 | `stderr.log` | pi 的错误输出 |
+
+**在 langfuse 里找这次运行：**
+
+`run.sh` 会显式加载 `@amaster.ai/pi-telemetry`（`-ne` 会跳过 pi package，所以要单独 `-e`），
+凭据仍然从 `~/.pi/agent/settings.json` 的 `pi-telemetry` 段读，脚本不碰。
+
+每次运行固定一个 trace id 并写进 `runs/<ARM>/langfuse.txt`：
+
+```bash
+cat runs/A/langfuse.txt
+```
+
+同时每个 span 带上 `task_run_id = agent-smoke/<ARM>/<instance_id>`，用它可以在 langfuse 里
+把评测运行和日常使用分开筛。没装 telemetry 包时脚本会打印 `langfuse: skipped` 并照常跑完。
 
 **主问题——它调了哪些工具：**
 
