@@ -1,6 +1,7 @@
 /** Drives the extension through a stubbed ExtensionAPI, without running pi. */
 import { beforeEach, describe, expect, it } from "vitest";
 import memoExtension from "../src/index.ts";
+import { CLOSING_NUDGE } from "../src/store/index-file.ts";
 import { createSandbox, type Sandbox } from "./helpers.ts";
 
 interface Registered {
@@ -104,10 +105,14 @@ describe("extension wiring", () => {
 		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
 		const contextHandler = (registered.handlers.get("context") ?? [])[0] as Function;
 		const result = await contextHandler({ messages: [{ role: "user", content: "hi", timestamp: 0 }] });
-		expect(result.messages).toHaveLength(2);
+		expect(result.messages).toHaveLength(3);
 		expect(result.messages[0].customType).toBe("memo-index");
 		expect(result.messages[0].content).toContain("build-and-check");
 		expect(result.messages[0].display).toBe(false);
+		// The write trigger goes last, after the task, not in front of it.
+		expect(result.messages.at(-1).customType).toBe("memo-write-reminder");
+		expect(result.messages.at(-1).content).toBe(CLOSING_NUDGE);
+		expect(result.messages.at(-1).display).toBe(false);
 	});
 
 	it("rejects a recall that passes neither query nor ids", async () => {

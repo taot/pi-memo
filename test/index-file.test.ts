@@ -38,12 +38,12 @@ describe("session index snapshot", () => {
 		expect(text.indexOf("p —")).toBeLessThan(text.indexOf("g —"));
 	});
 
-	// The write trigger has to survive a cold start: with an empty store the index
-	// lists nothing, so this line is all that is left of it in the snapshot.
-	it("closes with the write nudge, empty store included", () => {
+	// The trigger is delivered as the last message in context instead; keeping a
+	// copy here too would put the same sentence in front of the task and behind it.
+	it("leaves the write nudge out of the snapshot", () => {
 		for (const entries of [[], [entry("g")]]) {
 			const text = renderSessionIndex({ entries, usage: empty, conflicts: new Map() });
-			expect(text.trimEnd().endsWith(CLOSING_NUDGE)).toBe(true);
+			expect(text).not.toContain(CLOSING_NUDGE);
 		}
 	});
 

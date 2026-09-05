@@ -9,17 +9,9 @@ import { KINDS, type Kind, type Scope, indexFilePath } from "./paths.ts";
 import type { UsageMap } from "./usage.ts";
 
 /**
- * Closing line of the injected snapshot, repeating the write trigger that also
- * rides in `memory_write`'s `promptGuidelines`.
- *
- * Measured, and it does not work on its own: four arm-A runs with the guideline
- * alone and four more with this line as well both called the memory tools zero
- * times (`eval/agent-smoke/NOTES.md`). A payload dump shows why the obvious
- * explanation is wrong — pi delivers this snapshot as a plain `role: "user"`
- * message at `input[0]`, the same channel as the one nudge that did work, so the
- * live variable is not system-vs-user but whether the sentence is part of the
- * task statement itself. Kept because it costs ~30 tokens and is a prerequisite
- * for testing that, not because it is known to help.
+ * The write trigger, repeating what also rides in `memory_write`'s
+ * `promptGuidelines`. Delivered as the *last* message in context, not part of
+ * this snapshot — see the `context` hook in `src/index.ts` for why.
  */
 export const CLOSING_NUDGE =
 	"Before you finish this task, store anything you learned that would have saved you time at the start (memory_write). Nothing worth keeping is a valid outcome.";
@@ -102,8 +94,7 @@ export function renderSessionIndex(input: SessionIndexInput): string {
 
 	const ordered = snapshotOrder(input.entries, input.usage);
 	const listed: Entry[] = [];
-	// The closing nudge is unconditional, so it is part of the budget, not on top of it.
-	let tokens = estimateTokens(header.join("\n")) + estimateTokens(CLOSING_NUDGE);
+	let tokens = estimateTokens(header.join("\n"));
 
 	for (const entry of ordered) {
 		if (listed.length >= MAX_INDEX_ENTRIES) break;
@@ -127,8 +118,6 @@ export function renderSessionIndex(input: SessionIndexInput): string {
 	if (remaining > 0) {
 		lines.push("", `_${remaining} more entries not listed. Use memory_recall with a query to search them._`);
 	}
-
-	lines.push("", CLOSING_NUDGE);
 
 	if (input.conflicts.size > 0) {
 		lines.push("", "## Conflicting ids (excluded, resolve by hand)");

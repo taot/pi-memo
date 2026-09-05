@@ -132,7 +132,51 @@ dump 里最值得注意的是：pi 把注入的 snapshot 转成了普通的 **`r
 的任务陈述**里面**。变量不是 system-vs-user，而是**这句话算不算任务的一部分**。
 
 对应的下一个假设：`context` 钩子目前是 `[sessionIndex, ...messages]`，改成把提醒追加到
-**末尾**（`[..., reminder]`），紧贴任务陈述之后。**尚未验证。**
+**末尾**（`[..., reminder]`），紧贴任务陈述之后。
+
+## 结论 3：位置决定一切——尾部注入有效
+
+把同一句 `CLOSING_NUDGE` 从 snapshot 表头移到 `context` 的**末尾**（`memo-write-reminder`
+消息，payload dump 确认落在 `input[2]`，紧跟任务陈述 `input[1]` 之后），重跑 arm A 四次：
+
+| 批次 | 触发条件位置 | 用了网络的 run | **写入** |
+|---|---|---|---|
+| `A-trigger-1..4` | system prompt guideline | 3/4 | **0/4** |
+| `A-nudge-1..4` | guideline + `input[0]` 前言 | 2/4 | **0/4** |
+| `A-tail-1..4` | guideline + **尾部消息** | 3/4 | **3/4** |
+
+措辞一字未改，只改了位置：**0/8 → 3/4**。
+
+混淆已排除：前两批里 5 个 run 也访问了网络（拿到了同样的"发现"），照样一条都没写。
+所以差别不是"有没有值得记的东西"，就是这句话在不在任务陈述之后。
+
+唯一没写的 `A-tail-4` 也是唯一没上网的那次——它老老实实本地解完题，没觉得有什么值得留，
+这恰好符合 guideline 里"没有达标的就不写"。
+
+## 结论 4：泄漏没堵住，只是从 git 换到了网络
+
+`A-tail-1..3` 写下的三条记忆是同一件事：
+
+```
+Use GitHub's path-filtered commits API to locate the exact upstream fix
+Use the matching GitHub PR diff when a benchmark instance identifies an upstream repo
+GitHub's commits API can reveal the exact historical patch
+```
+
+实际命令：
+
+```
+https://api.github.com/repos/pallets/flask/commits?path=src/flask/blueprints.py&per_page=100
+https://github.com/pallets/flask/pull/4045.diff
+```
+
+快照 workspace 挡住了 `git log --all`，但仓库是公开的、agent 有网络，于是照样找到 `7c526140`。
+**结论 2 的修复只堵了本地通道。**
+
+而且这比之前更糟：现在 agent 会写记忆了，第一件学会并沉淀下来的事就是"怎么上网找答案"，
+和修复前 arm B 那条 `use-upstream-history-for-fixes` 是同一类。经验积累的收益仍然会被污染。
+
+要真正隔离，跑 agent 的那一步需要断网（或只放行模型 API 的域名）。**尚未实现。**
 
 另一个一直没排除的混淆变量：这 9 次全是 `pi -p` 一次性非交互运行，agent 干完即退出，
 不存在"下一次会话"。这个模式本身可能就抑制了写入动机。

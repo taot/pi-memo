@@ -7,6 +7,7 @@
  */
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Memo, MemoError } from "./memo.ts";
+import { CLOSING_NUDGE } from "./store/index-file.ts";
 import { runGc, parseGcArgs } from "./commands/gc.ts";
 import { runStats } from "./commands/stats.ts";
 import { createForgetTool } from "./tools/forget.ts";
@@ -15,6 +16,7 @@ import { createRecallTool } from "./tools/recall.ts";
 import { createWriteTool } from "./tools/write.ts";
 
 const INDEX_MESSAGE_TYPE = "memo-index";
+const REMINDER_MESSAGE_TYPE = "memo-write-reminder";
 
 type AgentMessage = ContextEvent["messages"][number];
 
@@ -30,6 +32,13 @@ export default function memoExtension(pi: ExtensionAPI): void {
 	let memo: Memo | undefined;
 	/** Fixed snapshot for this session; refreshed only on the next session. */
 	let sessionIndex: IndexMessage | undefined;
+	const writeReminder: IndexMessage = {
+		role: "custom",
+		customType: REMINDER_MESSAGE_TYPE,
+		content: CLOSING_NUDGE,
+		display: false,
+		timestamp: Date.now(),
+	};
 
 	const getMemo = (): Memo => {
 		if (!memo) memo = Memo.load(process.cwd());
@@ -62,10 +71,24 @@ export default function memoExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	// The snapshot rides at the head of every LLM call for this session.
+	// The snapshot rides at the head of every LLM call, and the write trigger at
+	// the tail.
+	//
+	// The trigger used to sit inside the snapshot, and measurably did nothing:
+	// four arm-A runs called the memory tools zero times, same as with no trigger
+	// at all (eval/agent-smoke/NOTES.md). A payload dump ruled out delivery — pi
+	// turns the snapshot into a plain `role: "user"` message, the same channel as
+	// the one nudge that did produce a write. What set that nudge apart was
+	// position: it was part of the task statement the model was working to
+	// satisfy, not a preamble sitting in front of it. At the tail this lands
+	// directly after the task on the first call, and after the latest tool result
+	// on every call after that, which is the closest we can get without editing
+	// the user's own message.
 	pi.on("context", async (event) => {
 		if (!sessionIndex) return;
-		return { messages: [sessionIndex as unknown as AgentMessage, ...event.messages] };
+		return {
+			messages: [sessionIndex as unknown as AgentMessage, ...event.messages, writeReminder as unknown as AgentMessage],
+		};
 	});
 
 	pi.on("agent_settled", async () => {
