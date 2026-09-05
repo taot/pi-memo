@@ -278,6 +278,60 @@ urllib:  URLError <urlopen error Tunnel connection failed: 403 Forbidden>
 
 现在的正则把这两种也算进去。**这类计数器要按客户端的实际输出写，不能按服务端的文案写。**
 
+## 结论 6：没装依赖时，学到的是我们自己挖的坑
+
+结论 5 里那两条「缺 MarkupSafe/pytest」的记忆读起来像是好结果，其实不是——workspace 从来
+没装过依赖，agent 跑不了测试，只能 `py_compile` 看语法。它记下的是**我们 harness 的缺陷**，
+每跑一次就重新学一遍，记忆槽位全浪费在自己造的坑上。
+
+`run.sh` 现在用 `uv` 在 `workspace/.venv` 里建环境。几个必须踩对的点：
+
+- **按题目日期解析依赖**：`--exclude-newer <instance 的 created_at>`。flask 2.0 声明
+  `Werkzeug>=2.0`，今天解析会装到 3.x，import 直接挂。装出来是 Werkzeug 2.0.0 /
+  Jinja2 3.0.0 / pytest 6.2.4。
+- **不能用 `pip install -e .`**：`--exclude-newer` 把 setuptools 也钉回 2021，那个版本没有
+  `build_editable`。改成普通安装拉依赖后卸掉 flask 本身，用 `PYTHONPATH=src`——flask 是
+  src 布局，agent 改完源码立刻生效，比 editable 更干净。
+- **显式装 setuptools**：`uv venv` 不带，而有两个测试要 `pkg_resources`。
+- 系统 Python 是 3.14，跑不动 2021 年的依赖，靠 `uv venv --python 3.9` 拉独立解释器。
+
+环境正确性有 oracle：gold patch + test_patch → **179 passed**。
+
+### 记忆内容再次改变，写入率再次下降
+
+| 批次 | 隔离 | 依赖 | pytest | 写入 | 记的是什么 |
+|---|---|---|---|---|---|
+| `A-tail-1..4` | 无 | 无 | 0 | 3/4 | 怎么用 GitHub API 抄上游修复 |
+| `A-net-1..4` | 有 | 无 | 0 | 2/4 | 这个 checkout 缺依赖 |
+| `A-env-1..4` | 有 | 有 | 1–6 次 | **1/4** | 领域教训（见下） |
+
+唯一那条：
+
+```
+[project/exp] blueprint-name-validation-test-impact
+改 Blueprint 名称校验时，要搜整个测试套件里传给 Blueprint 的带点名字，不只是
+tests/test_blueprints.py。tests/test_basic.py::test_inject_blueprint_url_defaults
+历史上用 foo.bar.baz 当 blueprint 名，在新约束下必须改成合法的单段名字。
+```
+
+这是**跑测试撞出来的**：它在预期之外的文件里发现了回归。这才是「早知道能省时间」。
+
+**但写入率从 3/4 一路掉到 1/4**，而且方向和环境质量相反。一个自洽的解释是：环境越干净、
+路越顺，「意外」越少，达标的东西自然越少——这正是 guideline 里「没有就不写」在起作用。
+但 n=4，3/4 vs 1/4 统计上说明不了什么，**不要当成已确证的因果**。
+
+如果这个趋势在更大样本上成立，它对项目是个真问题：一个搭好的环境里跑顺利的任务，
+经验积累速度会很慢，冷启动要很久才填得满。
+
+### recall 的豁免条款没生效
+
+3/4 的运行在开工前调了 `memory_recall`，查询本身很合理
+（`"repo conventions Flask blueprint validation tests"`），说明触发条件是有效的。
+但每次 store 都是空的，三次全返回 `No memories matched.`——我在 guideline 里写的
+「索引显示没有记忆时跳过」被无视了，每次冷启动白费一次调用。
+
+成本不高（真实使用中 store 不会是空的），但那句豁免等于没写。**尚未处理。**
+
 另一个一直没排除的混淆变量：这 9 次全是 `pi -p` 一次性非交互运行，agent 干完即退出，
 不存在"下一次会话"。这个模式本身可能就抑制了写入动机。
 

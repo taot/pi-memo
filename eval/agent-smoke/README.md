@@ -14,6 +14,7 @@
 | pi 已安装并配好鉴权 | `pi --version`，`~/.pi/agent/auth.json` 存在 |
 | pi-sandbox（网络隔离） | `ls ~/.pi/agent/npm/node_modules/pi-sandbox/index.ts` |
 | ripgrep（缺了沙箱静默关闭） | `command -v rg` |
+| uv（建任务的 Python 环境） | `uv --version` |
 | python3 | `python3 --version` |
 | jq | `jq --version` |
 | 读 parquet 的 venv | `ls ../swe-contextbench/.venv/bin/python` |
@@ -102,7 +103,30 @@ command -v rg                                          # 缺了沙箱会静默�
 每次运行产出 `net-blocked-count.txt`。非零是**正常**的，说明 agent 试图外联并被拒绝；
 为零则要么它这次没试，要么沙箱没生效——先看 `stderr.log` 再下结论。
 
-### 4. 跑
+### 4. 任务的 Python 环境（自动）
+
+因为 agent 没网，依赖必须在这里（沙箱外）装好，否则它跑不了测试，只能 `py_compile`
+看语法，然后把「这个 checkout 没装依赖」当成经验记下来——那是我们 harness 的毛病，
+不是这道题的性质（NOTES.md 结论 6）。
+
+`run.sh` 用 `uv` 在 `workspace/.venv` 建环境，并用 `--exclude-newer <instance 的 created_at>`
+按**题目当时的时间点**解析依赖。这一步不能省：flask 2.0 写的是 `Werkzeug>=2.0`，
+今天解析会装到 3.x，import 直接挂。
+
+因为 `--exclude-newer` 把 setuptools 也钉回 2021（没有 `build_editable`），所以不用
+`pip install -e .`，而是普通安装拉依赖后把 flask 本身卸掉，再用 `PYTHONPATH=src`——
+flask 是 src 布局，agent 改完源码立刻生效，无需重装。
+
+验证环境是对的（gold patch + test_patch 应当全绿）：
+
+```bash
+cd runs/A/workspace
+python3 -c "import json;d=json.load(open('../../instance.json'));open('/tmp/g.patch','w').write(d['patch']);open('/tmp/t.patch','w').write(d['test_patch'])"
+git apply /tmp/g.patch /tmp/t.patch
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest -q tests/test_blueprints.py tests/test_basic.py
+```
+
+### 5. 跑
 
 ```bash
 ./run.sh A
@@ -129,6 +153,7 @@ command -v rg                                          # 缺了沙箱会静默�
 | `langfuse.txt` | 这次运行的 langfuse trace id 和 task run id |
 | `memo-global/` | 全局 store（隔离的） |
 | `workspace/.pi/memo/` | 项目 store |
+| `workspace/.venv/` | 任务的 Python 环境（uv 按 instance 日期建） |
 | `stderr.log` | pi 的错误输出 |
 | `net-blocked-count.txt` | agent 试图外联被沙箱拒绝的次数 |
 

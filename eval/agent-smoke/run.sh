@@ -11,10 +11,12 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ARM="${1:-A}"
 RUN="$HERE/runs/$ARM"
 
-read -r INSTANCE BASE <<<"$(python3 -c "
+# CREATED_AT dates the dependency resolution, so the env matches what the instance
+# was written against rather than what PyPI serves today.
+read -r INSTANCE BASE CREATED_AT <<<"$(python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
-print(d['instance_id'], d['base_commit'])
+print(d['instance_id'], d['base_commit'], d['created_at'])
 " "$HERE/instance.json")"
 
 # Fresh workspace: the tree at base_commit and nothing else. A worktree of
@@ -72,6 +74,38 @@ cat > "$RUN/workspace/.pi/sandbox.json" <<'JSON'
   "allowAllUnixSockets": false
 }
 JSON
+
+# Working Python environment, built here (outside the sandbox) because the agent
+# has no network. Without it the agent cannot run the tests, so it verifies with
+# `py_compile` and then records "this checkout has no dependencies" as its lesson --
+# a fact about our harness, not about the task.
+#
+# --exclude-newer resolves as of the instance's own date: flask 2.0 declares
+# `Werkzeug>=2.0`, which today means Werkzeug 3.x and a broken import. It also pins
+# setuptools back to 2021, which has no `build_editable` -- hence a plain install
+# plus PYTHONPATH=src rather than `-e .`. src-layout means the agent's edits take
+# effect with no reinstall. setuptools is explicit because uv venv omits it and two
+# tests need pkg_resources; flask itself is uninstalled so only src/ is importable.
+VENV="$RUN/workspace/.venv"
+uv venv --quiet --python 3.9 "$VENV"
+(
+	cd "$RUN/workspace"
+	install_args=(. setuptools)
+	[ -f requirements/tests.txt ] && install_args+=(-r requirements/tests.txt)
+	uv pip install --python "$VENV/bin/python" --exclude-newer "$CREATED_AT" --quiet \
+		"${install_args[@]}"
+)
+uv pip uninstall --python "$VENV/bin/python" --quiet flask
+# Keep it out of the agent's `git status`; patch.diff only tracks tracked files anyway.
+echo ".venv/" >> "$RUN/workspace/.git/info/exclude"
+
+export PATH="$VENV/bin:$PATH"
+export PYTHONPATH="$RUN/workspace/src"
+
+if ! (cd "$RUN/workspace" && PYTHONPATH="$RUN/workspace/src" "$VENV/bin/python" -c "import flask" 2>/dev/null); then
+	echo "python env build failed: cannot import flask from src/" >&2
+	exit 1
+fi
 
 # Langfuse tracing. The telemetry extension is a pi package, so -ne skips it --
 # load it explicitly. Its langfuse credentials live in the `pi-telemetry` section
