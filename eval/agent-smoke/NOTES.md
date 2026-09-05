@@ -90,7 +90,52 @@ dependencies are not installed」——这是标准的 `env` 记忆素材，它�
 system prompt 的 guideline 比会话里的指令低一档，一个 200+ 步的编码任务足以把它稀释掉。
 
 下一步的方向是把触发条件挪到（或复制到）注入的 `memo-index` 消息里，那是会话内的
-message，权重接近 B 组那句有效的 nudge。**尚未验证。**
+message，权重接近 B 组那句有效的 nudge。
+
+### 又一个否定结果：index 表头的 nudge 同样无效
+
+`renderSessionIndex` 结尾加了 `CLOSING_NUDGE`（"Before you finish this task, store
+anything you learned that would have saved you time at the start"），重跑 arm A 四次
+（`runs/A-nudge-1..4`，trace 482–1907 行）：**`memory_*` 依然 0 次，4/4**。
+
+汇总：
+
+| 批次 | 触发条件所在位置 | n | `memory_write` |
+|---|---|---|---|
+| 最初的 A | 无 | 1 | 0 |
+| `A-trigger-1..4` | system prompt 的 guideline | 4 | 0 0 0 0 |
+| `A-nudge-1..4` | guideline + index 表头 | 4 | 0 0 0 0 |
+| 最初的 B | **user message（拼在任务陈述里）** | 1 | **1** |
+
+### 送达没有问题——payload dump 实测
+
+写了个一次性扩展挂 `before_provider_request`，把真实请求体落盘（`event.payload`，
+和 pi-telemetry 送进 langfuse 的是同一个对象）：
+
+- `instructions`（4734 字符，即 system prompt）**包含**那条 write guideline；
+- `input[0]` **包含**整段 memo index 和 `CLOSING_NUDGE`；
+- `tools[]` 里四个 memory 工具都在。
+
+模型也确实读得到：单独探针里让它复述 index，它把整段连同 nudge 逐字背了出来。
+
+**所以"看不见"只是 langfuse 的面板问题**——tool 面板只渲染 `tools[]`，而
+`promptGuidelines` 不属于 tool schema（pi 把它折进 `instructions`），nudge 则在
+Input 第 0 条消息里。两处都要去 generation 的 System / Input 里看。
+
+### 修正前面的判断
+
+dump 里最值得注意的是：pi 把注入的 snapshot 转成了普通的 **`role: "user"` 消息**，
+排在 `input[0]`。也就是说它和 B 组那句有效的 nudge **走的是同一个通道**。
+
+所以「system prompt 权重不够、挪到会话消息里就行」这个解释是错的——两者都试过，都是 0。
+真正的差别只剩位置：`input[0]` 是任务陈述**之前**的独立前言，B 组那句拼在 `input[1]`
+的任务陈述**里面**。变量不是 system-vs-user，而是**这句话算不算任务的一部分**。
+
+对应的下一个假设：`context` 钩子目前是 `[sessionIndex, ...messages]`，改成把提醒追加到
+**末尾**（`[..., reminder]`），紧贴任务陈述之后。**尚未验证。**
+
+另一个一直没排除的混淆变量：这 9 次全是 `pi -p` 一次性非交互运行，agent 干完即退出，
+不存在"下一次会话"。这个模式本身可能就抑制了写入动机。
 
 
 
