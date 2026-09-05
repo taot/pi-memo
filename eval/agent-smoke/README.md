@@ -12,6 +12,8 @@
 | 需要 | 检查 |
 |---|---|
 | pi 已安装并配好鉴权 | `pi --version`，`~/.pi/agent/auth.json` 存在 |
+| pi-sandbox（网络隔离） | `ls ~/.pi/agent/npm/node_modules/pi-sandbox/index.ts` |
+| ripgrep（缺了沙箱静默关闭） | `command -v rg` |
 | python3 | `python3 --version` |
 | jq | `jq --version` |
 | 读 parquet 的 venv | `ls ../swe-contextbench/.venv/bin/python` |
@@ -25,7 +27,7 @@
 ## 跑之前要清理什么
 
 短答案：**基本不用手动清理**，`run.sh` 每次会把对应 arm 的目录整个删掉重建
-（`worktree remove` → `rm -rf runs/<ARM>` → `worktree prune` → 重新 `worktree add`）。
+（`rm -rf runs/<ARM>` → `git archive` 出 tree → `git init` + 单次 commit）。
 
 真正要留意的只有两件事：
 
@@ -83,7 +85,24 @@ git -C runs/A/workspace rev-list --count HEAD    # 1
 git -C runs/A/workspace log --all --grep='blueprint name'   # 空
 ```
 
-### 3. 跑
+### 3. 网络隔离（自动，但有前置依赖）
+
+只堵本地 git 历史不够——agent 会改用 `bash` 里的 `curl` / `python urllib` 去
+`api.github.com` 和 `pypi.org` 拿同一个修复（NOTES.md 结论 4）。
+
+`run.sh` 靠 `pi-sandbox` 挡这条路：显式 `-e` 加载它（`-ne` 会让它跟着一起被禁用），
+并在 workspace 里写 `.pi/sandbox.json` 设 `deniedDomains: ["*"]`。它只包住 bash 工具，
+pi 自己连模型不受影响。两个依赖缺一不可，缺了 `run.sh` 直接退出而不是静默裸奔：
+
+```bash
+ls ~/.pi/agent/npm/node_modules/pi-sandbox/index.ts   # pi package
+command -v rg                                          # 缺了沙箱会静默关闭
+```
+
+每次运行产出 `net-blocked-count.txt`。非零是**正常**的，说明 agent 试图外联并被拒绝；
+为零则要么它这次没试，要么沙箱没生效——先看 `stderr.log` 再下结论。
+
+### 4. 跑
 
 ```bash
 ./run.sh A
@@ -111,6 +130,7 @@ git -C runs/A/workspace log --all --grep='blueprint name'   # 空
 | `memo-global/` | 全局 store（隔离的） |
 | `workspace/.pi/memo/` | 项目 store |
 | `stderr.log` | pi 的错误输出 |
+| `net-blocked-count.txt` | agent 试图外联被沙箱拒绝的次数 |
 
 **在 langfuse 里找这次运行：**
 
@@ -136,7 +156,8 @@ print(collections.Counter(json.loads(l)['toolName'] for l in open(sys.argv[1])
 " runs/A/trace.jsonl
 ```
 
-A 应该看到 `memory_write` 计数为 0，B 应该是 1。
+触发条件修好之前，A 是 0、B 是 1。现在写入提醒作为最后一条消息注入，A 也会写——
+四次运行里三次（NOTES.md 结论 3）。数字对不上先看 `dump_system_prompt.ts` 和注入位置。
 
 **它写了什么：**
 
@@ -178,7 +199,7 @@ pi-memo 就活在中间那两段里。改过 `src/tools/*.ts` 的提示文案之
 | `dump_system_prompt.ts` | 打印 agent 实际看到的系统提示（含 pi-memo 注入的工具行和 guideline）；零成本，不调 LLM |
 | `export_instance.py` | parquet → `instance.json` |
 | `prompt.py` | `instance.json` + arm → 提示词 |
-| `run.sh` | 建 workspace、隔离 store、跑 pi、抓 patch |
+| `run.sh` | 建快照 workspace、隔离 store 与网络、跑 pi、抓 patch |
 | `instance.json` | 当前这道题（已生成，可提交） |
 | `NOTES.md` | 跑完的结论 |
 | `repos/`、`runs/` | 本地产物，已 gitignore |

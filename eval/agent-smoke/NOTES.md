@@ -176,7 +176,107 @@ https://github.com/pallets/flask/pull/4045.diff
 而且这比之前更糟：现在 agent 会写记忆了，第一件学会并沉淀下来的事就是"怎么上网找答案"，
 和修复前 arm B 那条 `use-upstream-history-for-fixes` 是同一类。经验积累的收益仍然会被污染。
 
-要真正隔离，跑 agent 的那一步需要断网（或只放行模型 API 的域名）。**尚未实现。**
+### 已修：沙箱一直是开着的，是我们自己关掉了它
+
+不需要自己搭隔离。`pi-sandbox`（作为 pi package 装在 `~/.pi/agent/npm/`）**默认开启，
+`-p` 模式同样生效**，Linux 下的实现就是 bwrap `--unshare-net` + socat unix socket 桥 +
+主机侧 CONNECT 代理做域名过滤，而且只包住 **bash 工具**，pi 自己调模型 API 不受影响。
+
+问题出在 `run.sh` 自己那句 `-ne`。它是 `--no-extensions`，而 pi-sandbox 是**作为扩展被
+发现加载**的，所以"只挂 pi-memo"把沙箱一起关了——前面九次运行全部是裸奔。
+
+而且就算开着，默认白名单也不够：
+
+```
+"allowedDomains": ["github.com", "*.github.com", "api.github.com",
+                   "raw.githubusercontent.com", "pypi.org", "*.pypi.org", ...]
+```
+
+github 和 pypi 都明写在里面。`pypi.org` 单独就够致命——`pip download flask==2.0` 里就有修复。
+
+修法（`run.sh`）：
+
+- 用 `-e "$SANDBOX"` 显式加载（`-ne` 只禁用发现，显式路径仍然生效），并且**缺了就退出**，
+  不允许静默裸奔；同时检查 `rg`——缺它时 pi-sandbox 会吞掉自己的初始化失败继续跑，沙箱静默关闭。
+- workspace 里写 `.pi/sandbox.json`，`deniedDomains: ["*"]`。数组是 global+project **并集**
+  合并，项目层删不掉继承来的 github/pypi；但 `deniedDomains` 先判且 `*` 匹配一切。
+  另外 `allowAllUnixSockets: false` 恢复全局配置关掉的 seccomp `AF_UNIX` 拦截。
+- 产出 `net-blocked-count.txt`，把"试图外联被拒"变成可测信号。
+
+实测四条路径全部封死：
+
+```
+api.github.com/repos/pallets/flask/commits   -> 403 Tunnel connection failed
+github.com/pallets/flask/pull/4045.diff      -> 403 Tunnel connection failed
+pypi.org/simple/flask/                       -> 403 Tunnel connection failed
+socket.create_connection(("140.82.121.4",443)) -> OSError 101 Network is unreachable
+```
+
+最后一条是关键：裸 IP 直连也不通，绕过 DNS 没用，因为 netns 里根本没有路由。
+
+同时，沙箱的文件系统策略（`allowRead` 只有 `.`）也挡住了 `cd ../../repos/flask &&
+git log --all` 这条**完全不需要网络**的路径——`repos/flask` 那个全量 clone 在 workspace 之外。
+
+这是有意的：**agent 不应该看到任何 git 历史。** 如果以后想让它看，正确做法是在 workspace 上
+做历史截断后给它，而不是放开 `allowRead` 去读那个全量 clone——后者给的是"未来的提交"，
+前者给的是"到 base 为止的真实历史"，是两码事。
+
+## 结论 5：隔离之后，记的东西终于是对的了
+
+隔离后重跑 arm A 四次（`runs/A-net-1..4`）：
+
+| 批次 | 网络 | 写入 | 记的是什么 |
+|---|---|---|---|
+| `A-tail-1..4` | 放开 | 3/4 | 全是「怎么用 GitHub API 找上游修复」 |
+| `A-net-1..4` | 拒绝一切 | 2/4 | 全是「这个 checkout 缺 MarkupSafe/pytest，先用静态检查」 |
+
+写入率 3/4 → 2/4，n=4，差异在噪声范围内；而且合理——之前那个"发现"本身就是它觉得值得记的
+材料，material 没了，达标的东西自然变少。
+
+**真正的变化是内容。** 两条新记忆都是 `project/env`，讲的是环境事实：
+
+```
+flask-test-dependencies-not-installed
+  Importing the local Flask package currently fails because MarkupSafe is not
+  installed, so pytest and import-based smoke tests require installing the
+  dependencies first. Syntax-only checks such as `python -m py_compile` work.
+```
+
+这才是「下次能省时间」的东西，而不是抄答案的方法论。
+
+`net-blocked-count.txt` 显示 4 次里 3 次仍然试了外联（`git ls-remote`、
+`curl api.github.com`、`python urllib`），全部被拦——它还在找路，只是路没了。
+
+### 补丁形状是独立佐证
+
+```
+A-tail-1  CHANGES.rst  blueprints.py  test_basic.py  test_blueprints.py
+A-tail-2  CHANGES.rst  blueprints.py  test_basic.py  test_blueprints.py
+A-tail-3  CHANGES.rst  blueprints.py  test_basic.py  test_blueprints.py
+A-net-1                blueprints.py
+A-net-2                blueprints.py
+A-net-4                blueprints.py
+```
+
+用了 GitHub 的三次产出**逐字相同的四文件足迹**，正是上游 commit 的印记；gold patch 只动
+`src/flask/blueprints.py`。隔离后 4 次里 3 次收敛到 gold 的形状。
+
+例外是 `A-net-3`，它在被拦的情况下仍然写了 `CHANGES.rst` 和测试——那不可能来自网络
+（`net-blocked=6`），更可能是模型预训练里就记得这个改动，或者自己判断该补 changelog。
+**预训练污染是这个 benchmark 的固有问题，隔离解决不了**，只是它不再是最省力的那条路。
+
+### 计数器踩过的坑
+
+`net-blocked-count.txt` 第一版报 0，而实际上 agent 试了三次全被拦。原因是代理自己的文案
+（`Connection blocked by network allowlist`）只在客户端打印 response body 时才出现，而
+`curl -o /dev/null` 和 git 都不打印。trace 里真正留下的是各客户端对 CONNECT 被拒的渲染：
+
+```
+git:     fatal: unable to access '...': CONNECT tunnel failed, response 403
+urllib:  URLError <urlopen error Tunnel connection failed: 403 Forbidden>
+```
+
+现在的正则把这两种也算进去。**这类计数器要按客户端的实际输出写，不能按服务端的文案写。**
 
 另一个一直没排除的混淆变量：这 9 次全是 `pi -p` 一次性非交互运行，agent 干完即退出，
 不存在"下一次会话"。这个模式本身可能就抑制了写入动机。
