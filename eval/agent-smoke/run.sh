@@ -17,13 +17,28 @@ d = json.load(open(sys.argv[1]))
 print(d['instance_id'], d['base_commit'])
 " "$HERE/instance.json")"
 
-# Fresh workspace at base_commit. The prune clears registrations left behind by
-# an `rm -rf runs/` that skipped `worktree remove`.
-git -C "$HERE/repos/flask" worktree remove --force "$RUN/workspace" 2>/dev/null || true
+# Fresh workspace: the tree at base_commit and nothing else. A worktree of
+# repos/flask would share its object database and all of its refs, which lets the
+# agent find the upstream fix with `git log --all` and copy it -- see NOTES.md.
 rm -rf "$RUN"
+# Clears registrations left behind by worktrees from earlier versions of this script.
 git -C "$HERE/repos/flask" worktree prune
-mkdir -p "$RUN"
-git -C "$HERE/repos/flask" worktree add --quiet --detach "$RUN/workspace" "$BASE"
+mkdir -p "$RUN/workspace"
+git -C "$HERE/repos/flask" archive --format=tar "$BASE" | tar -x -C "$RUN/workspace"
+git -C "$RUN/workspace" init --quiet -b main
+# -f: flask's own .gitignore covers tracked fixtures (tests/test_apps/.env,
+# .flaskenv), which plain `add -A` would leave untracked and out of the diff.
+git -C "$RUN/workspace" add -A -f
+# -c so the run does not depend on the user's global git identity.
+git -C "$RUN/workspace" \
+	-c user.name="eval" -c user.email="eval@localhost" \
+	commit --quiet -m "$INSTANCE base $BASE"
+
+# The whole point of the snapshot: one commit, no remotes, no future refs.
+if [ "$(git -C "$RUN/workspace" rev-list --count HEAD)" != 1 ]; then
+	echo "workspace is not a clean snapshot" >&2
+	exit 1
+fi
 
 python3 "$HERE/prompt.py" "$ARM" > "$RUN/prompt.txt"
 

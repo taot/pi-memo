@@ -64,6 +64,19 @@ describe("extension wiring", () => {
 		expect([...registered.commands.keys()].sort()).toEqual(["memo-gc", "memo-stats"]);
 	});
 
+	// A guideline that only classifies ("write env vs exp") never tells the model
+	// when to reach for the tool, which is how the store stayed empty. Each tool
+	// must keep at least one guideline that names an observable moment.
+	it("gives every memory tool a guideline with a trigger condition", () => {
+		const { pi, registered } = stubPi();
+		memoExtension(pi);
+		for (const name of ["memory_recall", "memory_write", "memory_revise", "memory_forget"]) {
+			const guidelines: string[] = registered.tools.get(name).promptGuidelines ?? [];
+			expect(guidelines.length, name).toBeGreaterThan(0);
+			expect(guidelines.some((line) => /^(When|Before) /.test(line)), name).toBe(true);
+		}
+	});
+
 	it("injects the index snapshot and recalls what was written in the same session", async () => {
 		const { pi, registered } = stubPi();
 		memoExtension(pi);

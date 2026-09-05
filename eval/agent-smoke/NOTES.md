@@ -59,6 +59,41 @@ Guidelines:
 这也解释了 B 组：那句 nudge 提供的正是缺失的触发时机，一给就写了。
 **缺口在触发条件，不在分类法，也不在能力。**
 
+> **已改，但没用**：四个工具的 `promptGuidelines` 各补了一条触发条件，原有的分类法/限制
+> 作为从句保留。recall 加「上手不熟悉的部分、或撞到没见过的报错和约定时先搜」（并显式说明
+> index 为空时跳过，避免冷启动空转）；write 加「收尾前判断这次学到的东西是否『早知道
+> 能省时间』」，配一句反面清单（显而易见的、流水账的不写）和一句「没有就不写」；
+> revise 和 forget 改写成触发条件在前的句式。判断什么重要交给模型，不列清单。
+>
+> 改完重跑 arm A **四次**（`runs/A-trigger-1..4`，都在快照 workspace 上）：
+>
+> | run | 总工具调用 | `memory_*` | patch |
+> |---|---|---|---|
+> | 1 | 211 | **0** | 3 files |
+> | 2 | 238 | **0** | 4 files |
+> | 3 | 126 | **0** | 2 files |
+> | 4 | 213 | **0** | 2 files |
+>
+> 四次全零，一次 `memory_*` 都没调。所以 n=1 的 0 不是噪声。
+
+### 追加结论：system prompt 层的 guideline 权重不够
+
+送达是没问题的——`dump_system_prompt.ts` 能看到全部六条；另外单独探了一次，让模型复述自己的
+系统提示，它答的是「assist with coding tasks, use available tools appropriately, make precise
+edits, verify work, **manage relevant memories**, and keep responses concise」，说明记忆相关的
+指令确实在它眼里。
+
+而且素材是有的：run 1 收尾时自己说「Tests could not run because `pytest` and runtime
+dependencies are not installed」——这是标准的 `env` 记忆素材，它照样没写。
+
+对比 B 组：同一句话放进 **user message** 就写了。差别不在措辞，在**注入位置**——
+system prompt 的 guideline 比会话里的指令低一档，一个 200+ 步的编码任务足以把它稀释掉。
+
+下一步的方向是把触发条件挪到（或复制到）注入的 `memo-index` 消息里，那是会话内的
+message，权重接近 B 组那句有效的 nudge。**尚未验证。**
+
+
+
 ### 冷启动是闭环的
 
 空 store → 注入的 index 是空的 → recall 的触发条件永远为假 → 不 recall；
@@ -97,6 +132,22 @@ git show 7c526140 -- src/flask/blueprints.py tests/... CHANGES.rst
 注意：官方 `Dockerfile.instance` 也是 `git clone` 全量 + `git checkout ${BASE_COMMIT}`，
 所以同样的泄漏在上游镜像里也存在。我们自己的 harness 至少要把 workspace 换成
 无未来历史的快照（`git archive` 出 tree 后重新 `git init`，或 `fetch --depth 1 <sha>`）。
+
+> **已修**：`run.sh` 不再用 `git worktree`。改成 `git archive "$BASE"` 取出 tree，
+> 解到空目录后 `git init` + 单次 commit，workspace 于是只有一个 commit、没有 remote、
+> 没有未来 refs。`repos/flask` 只当 tree 的来源，历史和 refs 不再泄漏进去。脚本随后断言
+> `rev-list --count HEAD == 1`，谁把 worktree 改回来都会直接报错退出。
+>
+> 选 `git archive` 而不是 `fetch --depth 1 <sha>`：后者要联网，还依赖服务端开
+> `uploadpack.allowReachableSHA1InWant`。
+>
+> 副作用：prompt 里的 `base_commit` sha 在 workspace 里已经解析不出来了。这是刻意的——
+> arm A 要逐字复刻 SWE-ContextBench 的提示，而 agent 去 `git show` 一个它本来就不该有的
+> 提交时，失败才是正确行为。
+>
+> 旧 run 里 B 写下的那条 `exp/use-upstream-history-for-fixes` 记忆把这个漏洞固化成了
+> 方法论，重跑该 arm 会随 `rm -rf "$RUN"` 一起清掉；想留作「修复前」的证据就先
+> `mv runs/B runs/B-preleakfix`。
 
 ## 结论 3：patch 提取口径要定死
 

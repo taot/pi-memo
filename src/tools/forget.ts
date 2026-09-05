@@ -15,7 +15,7 @@ export function createForgetTool(getMemo: () => Memo): ToolDefinition {
 		description: "Delete a memory file and drop it from the index, the retrieval cache and the usage stats.",
 		promptSnippet: "Delete a stored memory",
 		promptGuidelines: [
-			"Delete a memory with memory_forget only when it is wrong or obsolete, not merely unused.",
+			"When a memory turns out to be wrong, or to be about a file, command or behavior this repo no longer has, delete it with memory_forget; leave memories you simply did not use this session alone.",
 		],
 		parameters: ForgetParams,
 		async execute(_toolCallId, rawParams) {

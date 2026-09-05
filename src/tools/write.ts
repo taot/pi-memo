@@ -53,6 +53,7 @@ export function createWriteTool(getMemo: () => Memo): ToolDefinition {
 		promptSnippet: "Store a durable memory (user preference, verifiable fact, or experience)",
 		promptGuidelines: [
 			"Write a verifiable cause or fact as an `env` memory with memory_write, and the strategy or what-to-do-next-time as an `exp` memory; write both when a lesson has each.",
+			"Before you finish a task, ask whether anything you learned would have saved you time had you known it at the start — a non-obvious cause, a constraint that shaped the fix, an approach that worked after others failed. Store that with memory_write. Skip what is already plain from the code, the task text, or a single command, and skip a narration of what you just did; if nothing clears that bar, write nothing.",
 		],
 		parameters: WriteParams,
 		async execute(_toolCallId, rawParams) {

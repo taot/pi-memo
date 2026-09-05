@@ -35,12 +35,12 @@
    ```
    否则下次跑 `./run.sh A` 就没了。
 
-2. **手动删过 `runs/` 的话**，`repos/flask` 里会残留 worktree 注册信息。
-   `run.sh` 开头已经带了 `worktree prune`，但想自己确认：
+2. **早期版本的 `run.sh` 用 worktree 建 workspace**，`repos/flask` 里可能残留注册信息。
+   现在的 `run.sh` 不再建 worktree，开头的 `worktree prune` 会清掉这些残留。想自己确认：
    ```bash
    git -C repos/flask worktree list
    ```
-   只应看到 `repos/flask` 本身和当前存在的 `runs/*/workspace`。
+   只应看到 `repos/flask` 本身。
 
 **不需要**清理的：`repos/flask`（clone 一次反复用）、`instance.json`（固定数据）。
 
@@ -70,10 +70,18 @@ gold patch 只改一个文件，好读。想换题就传 instance_id：
 mkdir -p repos && git clone https://github.com/pallets/flask.git repos/flask
 ```
 
-约 16MB。
+约 16MB。全量历史包含了**修复这道题的上游 commit**，所以这个 clone 只当 tree 的来源用，
+它的历史和 refs 不进 workspace。
 
-> ⚠️ 这一步就是 NOTES.md 里说的那个坑：全量历史包含了**修复这道题的上游 commit**，
-> agent 会 `git log --all` 翻出来直接抄。这是已知问题，还没修。
+`run.sh` 用 `git archive` 取出 `base_commit` 的 tree，再 `git init` + 单次 commit，
+workspace 因此是一个**只有一个 commit、没有 remote、没有未来 refs** 的独立仓库。
+早先的版本用 `git worktree`，workspace 与 clone 共享 object DB 和全部 refs，agent
+`git log --all` 就能翻出上游修复直接抄——见 NOTES.md 结论 2。想确认没退化：
+
+```bash
+git -C runs/A/workspace rev-list --count HEAD    # 1
+git -C runs/A/workspace log --all --grep='blueprint name'   # 空
+```
 
 ### 3. 跑
 

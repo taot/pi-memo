@@ -38,6 +38,7 @@ export function createRecallTool(getMemo: () => Memo): ToolDefinition {
 			"Exactly one of `query` or `ids` must be given.",
 		promptSnippet: "Read or search stored long-term memories (user, env, exp)",
 		promptGuidelines: [
+			"When you start on an unfamiliar part of this repo, or hit an error, convention or constraint you have not seen here before, search memory_recall with a query before planning from scratch — the index shows titles only, and caps how many it lists. Skip this when the index says no memories are stored.",
 			"When the memo memory index lists an entry that looks relevant, call memory_recall for its full text instead of guessing the content from the title.",
 		],
 		parameters: RecallParams,

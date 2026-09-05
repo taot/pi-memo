@@ -45,7 +45,7 @@ export function createReviseTool(getMemo: () => Memo): ToolDefinition {
 			"Omitted fields stay unchanged; `null` clears `verify` or `tags`.",
 		promptSnippet: "Update a stored memory in place",
 		promptGuidelines: [
-			"When a stored memory turns out to be outdated rather than wrong in kind, update it with memory_revise instead of writing a second entry about the same thing.",
+			"When a memory you recalled no longer matches what you just observed in the repo, correct it with memory_revise as soon as you notice — do not leave it stale, and do not write a second entry about the same thing.",
 		],
 		parameters: ReviseParams,
 		async execute(_toolCallId, rawParams) {
