@@ -7,7 +7,7 @@
  */
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Memo, MemoError } from "./memo.ts";
-import { CLOSING_NUDGE } from "./store/index-file.ts";
+import { closingNudge } from "./store/index-file.ts";
 import { runGc, parseGcArgs } from "./commands/gc.ts";
 import { runStats } from "./commands/stats.ts";
 import { createForgetTool } from "./tools/forget.ts";
@@ -32,13 +32,8 @@ export default function memoExtension(pi: ExtensionAPI): void {
 	let memo: Memo | undefined;
 	/** Fixed snapshot for this session; refreshed only on the next session. */
 	let sessionIndex: IndexMessage | undefined;
-	const writeReminder: IndexMessage = {
-		role: "custom",
-		customType: REMINDER_MESSAGE_TYPE,
-		content: CLOSING_NUDGE,
-		display: false,
-		timestamp: Date.now(),
-	};
+	/** Built with the snapshot: which tools it names depends on what is stored. */
+	let writeReminder: IndexMessage | undefined;
 
 	const getMemo = (): Memo => {
 		if (!memo) memo = Memo.load(process.cwd());
@@ -56,6 +51,13 @@ export default function memoExtension(pi: ExtensionAPI): void {
 				display: false,
 				timestamp: Date.now(),
 			};
+			writeReminder = {
+				role: "custom",
+				customType: REMINDER_MESSAGE_TYPE,
+				content: closingNudge(memo.entries().length > 0),
+				display: false,
+				timestamp: Date.now(),
+			};
 			if (memo.conflicts.size > 0) {
 				ctx.ui.notify(
 					`memo: ${memo.conflicts.size} conflicting memory id(s) excluded; run /memo-gc for details`,
@@ -67,6 +69,7 @@ export default function memoExtension(pi: ExtensionAPI): void {
 			}
 		} catch (error) {
 			sessionIndex = undefined;
+			writeReminder = undefined;
 			ctx.ui.notify(`memo: failed to load memories: ${(error as Error).message}`, "error");
 		}
 	});
@@ -85,7 +88,7 @@ export default function memoExtension(pi: ExtensionAPI): void {
 	// on every call after that, which is the closest we can get without editing
 	// the user's own message.
 	pi.on("context", async (event) => {
-		if (!sessionIndex) return;
+		if (!sessionIndex || !writeReminder) return;
 		return {
 			messages: [sessionIndex as unknown as AgentMessage, ...event.messages, writeReminder as unknown as AgentMessage],
 		};

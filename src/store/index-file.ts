@@ -12,9 +12,39 @@ import type { UsageMap } from "./usage.ts";
  * The write trigger, repeating what also rides in `memory_write`'s
  * `promptGuidelines`. Delivered as the *last* message in context, not part of
  * this snapshot — see the `context` hook in `src/index.ts` for why.
+ *
+ * This variant is for an empty store, where write is the only tool with anything
+ * to do.
+ *
+ * The quality bar is `memory_write`'s own guideline wording, repeated verbatim
+ * rather than paraphrased: one phrasing in two places is one thing to tune. It is
+ * here because the one memory a run did write was a correct but single-use lesson
+ * — how to keep `flask routes` backward compatible while adding a column — which
+ * the next task in that repo could not reuse (eval/agent-smoke/NOTES.md 结论 8);
+ * "skip a narration of what you just did" is the clause that rules that out.
  */
 export const CLOSING_NUDGE =
-	"Before you finish this task, store anything you learned that would have saved you time at the start (memory_write). Nothing worth keeping is a valid outcome.";
+	"Before you finish this task, ask whether anything you learned would have saved you time had you known it at the start — a non-obvious cause, a constraint that shaped the fix, an approach that worked after others failed. Store that with memory_write. Skip what is already plain from the code, the task text, or a single command, and skip a narration of what you just did; if nothing clears that bar, write nothing.";
+
+/**
+ * The trigger once the store has entries: the other three tools act on stored
+ * memories, so they are worth naming only when there are some. Recall comes first
+ * because the check it prompts — does an entry already cover this? — is what
+ * routes the rest to revise instead of a duplicate write.
+ *
+ * Listing them against an empty index would be exactly the cold-start busywork the
+ * recall guideline's own exemption is meant to prevent: three of four arm-A runs
+ * opened with a recall that could only return nothing (eval/agent-smoke/NOTES.md).
+ */
+export const CLOSING_NUDGE_WITH_STORE = [
+	CLOSING_NUDGE,
+	"Check the memory index above first: read a listed entry with memory_recall instead of guessing it from the title, and if one already covers what you were about to store, or no longer matches what you saw in this repo, correct it with memory_revise rather than adding a second entry about the same thing. Delete one with memory_forget only when it is wrong or is about a file, command or behavior this repo no longer has — not merely because you did not use it.",
+].join(" ");
+
+/** The trigger that fits the store: the extra tools need something to act on. */
+export function closingNudge(hasEntries: boolean): string {
+	return hasEntries ? CLOSING_NUDGE_WITH_STORE : CLOSING_NUDGE;
+}
 
 /** Caps for the injected snapshot; whichever is reached first wins. */
 export const MAX_INDEX_ENTRIES = 50;

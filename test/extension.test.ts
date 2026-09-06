@@ -1,7 +1,7 @@
 /** Drives the extension through a stubbed ExtensionAPI, without running pi. */
 import { beforeEach, describe, expect, it } from "vitest";
 import memoExtension from "../src/index.ts";
-import { CLOSING_NUDGE } from "../src/store/index-file.ts";
+import { CLOSING_NUDGE, CLOSING_NUDGE_WITH_STORE } from "../src/store/index-file.ts";
 import { createSandbox, type Sandbox } from "./helpers.ts";
 
 interface Registered {
@@ -109,10 +109,26 @@ describe("extension wiring", () => {
 		expect(result.messages[0].customType).toBe("memo-index");
 		expect(result.messages[0].content).toContain("build-and-check");
 		expect(result.messages[0].display).toBe(false);
-		// The write trigger goes last, after the task, not in front of it.
+		// The write trigger goes last, after the task, not in front of it, and with
+		// entries in the store it also names the tools that act on them.
 		expect(result.messages.at(-1).customType).toBe("memo-write-reminder");
-		expect(result.messages.at(-1).content).toBe(CLOSING_NUDGE);
+		expect(result.messages.at(-1).content).toBe(CLOSING_NUDGE_WITH_STORE);
+		expect(result.messages.at(-1).content).toContain("memory_recall");
 		expect(result.messages.at(-1).display).toBe(false);
+	});
+
+	it("names only memory_write in the trigger while the store is empty", async () => {
+		const { pi, registered } = stubPi();
+		memoExtension(pi);
+		const ctx = stubCtx(sandbox.projectRoot, registered);
+		for (const handler of registered.handlers.get("session_start") ?? []) await handler({}, ctx);
+
+		const contextHandler = (registered.handlers.get("context") ?? [])[0] as Function;
+		const result = await contextHandler({ messages: [{ role: "user", content: "hi", timestamp: 0 }] });
+		// Recall, revise and forget would have nothing to act on -- the cold-start
+		// busywork the recall exemption is meant to prevent.
+		expect(result.messages.at(-1).content).toBe(CLOSING_NUDGE);
+		expect(result.messages.at(-1).content).not.toContain("memory_recall");
 	});
 
 	it("rejects a recall that passes neither query nor ids", async () => {
