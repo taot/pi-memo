@@ -30,7 +30,9 @@ print(d['instance_id'], d['base_commit'], d['created_at'])
 # file:// (not a plain path) forces the git transport: a local-path clone hardlinks
 # the whole object database and ignores --depth.
 DEPTH="${DEPTH:-500}"
-SNAP_BRANCH="eval-snapshot-$INSTANCE"
+# ARM is in the name so two arms can build their workspaces at the same time without
+# clobbering each other's branch in repos/flask.
+SNAP_BRANCH="eval-snapshot-$ARM-$INSTANCE"
 rm -rf "$RUN"
 # Clears registrations left behind by worktrees from earlier versions of this script.
 git -C "$HERE/repos/flask" worktree prune
@@ -64,6 +66,8 @@ if [ -n "$(git -C "$RUN/workspace" remote)" ]; then
 fi
 
 python3 "$HERE/prompt.py" "$ARM" > "$RUN/prompt.txt"
+# instance.json is rewritten whenever the task changes; keep the one this run used.
+cp "$HERE/instance.json" "$RUN/instance.json"
 
 # Isolated global store. The project store lands in workspace/.pi/memo.
 export PI_MEMO_HOME="$RUN/memo-global"
@@ -107,8 +111,12 @@ JSON
 # plus PYTHONPATH=src rather than `-e .`. src-layout means the agent's edits take
 # effect with no reinstall. setuptools is explicit because uv venv omits it and two
 # tests need pkg_resources; flask itself is uninstalled so only src/ is importable.
+# PYVER: the system interpreter is far too new for these pinned dependency sets, so
+# uv fetches one. 3.9 suits the 2021 instances; the 2023 ones (flask 2.3) need 3.11,
+# where tomllib exists and the resolved wheels are built.
+PYVER="${PYVER:-3.9}"
 VENV="$RUN/workspace/.venv"
-uv venv --quiet --python 3.9 "$VENV"
+uv venv --quiet --python "$PYVER" "$VENV"
 (
 	cd "$RUN/workspace"
 	install_args=(. setuptools)
@@ -132,22 +140,29 @@ fi
 # load it explicitly. Its langfuse credentials live in the `pi-telemetry` section
 # of ~/.pi/agent/settings.json; this script neither reads nor copies them.
 #
-# PI_TELEMETRY_TRACE_ID pins the root trace id so the run dir can name it (the
-# extension otherwise generates one internally and never prints it).
-# PI_TELEMETRY_TASK_RUN_ID rides along on every span, which is how these runs
-# stay separable from ordinary pi usage in the same langfuse project.
+# PI_TELEMETRY_TASK_RUN_ID rides along on every span (langfuse stores it as
+# metadata.taskRunId), which is how these runs stay separable from ordinary pi usage
+# in the same langfuse project -- and it is the ONLY reliable way to find the run.
+#
+# PI_TELEMETRY_TRACE_ID is deliberately not set: the extension only applies a preset
+# id inside its `input` handler (pi-telemetry/dist/extension.js:216), which `pi -p`
+# never reaches, so it falls back to a random id (line 227-228) and the id we printed
+# matched nothing in langfuse. Verified: the three runs are there under their
+# taskRunId, with ids the extension minted itself.
 TELEMETRY="$HOME/.pi/agent/npm/node_modules/@amaster.ai/pi-telemetry/dist/index.js"
 telemetry_args=()
 if [ -f "$TELEMETRY" ]; then
-	PI_TELEMETRY_TRACE_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
-	export PI_TELEMETRY_TRACE_ID
 	export PI_TELEMETRY_TASK_RUN_ID="agent-smoke/$ARM/$INSTANCE"
 	telemetry_args=(-e "$TELEMETRY")
 	{
-		echo "trace_id:    $PI_TELEMETRY_TRACE_ID"
 		echo "task_run_id: $PI_TELEMETRY_TASK_RUN_ID"
+		echo "started:     $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		echo
+		echo "Find it in langfuse by metadata.taskRunId (the trace id is minted by the"
+		echo "extension and is not knowable from here):"
+		echo "  Traces -> filter Metadata taskRunId = $PI_TELEMETRY_TASK_RUN_ID"
 	} > "$RUN/langfuse.txt"
-	LANGFUSE_NOTE="trace $PI_TELEMETRY_TRACE_ID"
+	LANGFUSE_NOTE="task_run_id $PI_TELEMETRY_TASK_RUN_ID"
 else
 	LANGFUSE_NOTE="skipped, @amaster.ai/pi-telemetry not installed"
 fi
@@ -181,5 +196,15 @@ git -C "$RUN/workspace" diff -- . ':(exclude).pi' > "$RUN/patch.diff" || true
 # where the agent tried three times and was blocked every time.
 grep -ciE 'tunnel( connection)? failed|blocked by network allowlist|is blocked \(not in allowedDomains\)' \
 	"$RUN/trace.jsonl" > "$RUN/net-blocked-count.txt" || true
+
+# Resolve the langfuse trace and session ids, which only exist after the run: the
+# extension mints both internally (see the PI_TELEMETRY_TRACE_ID note above; the
+# session id is a fresh randomUUID at extension init). The lookup goes by
+# taskRunId. It reads the langfuse credentials from ~/.pi/agent/settings.json --
+# read-only, sent only to the baseUrl configured there, never printed -- and never
+# fails the run.
+if [ -f "$RUN/langfuse.txt" ]; then
+	python3 "$HERE/langfuse_lookup.py" "$PI_TELEMETRY_TASK_RUN_ID" >> "$RUN/langfuse.txt" || true
+fi
 
 echo "done -> $RUN"

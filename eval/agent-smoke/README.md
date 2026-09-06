@@ -66,6 +66,13 @@ gold patch 只改一个文件，好读。想换题就传 instance_id：
 ```
 
 换题之后记得把下面 clone 的仓库也换掉（`run.sh` 里的 `repos/flask` 是写死的）。
+Lite 经验池里 flask 共 3 道题（`4045` / `4992` / `5063`），换这三道之间不用动 clone。
+
+依赖集按 instance 的日期解析，解释器版本得跟着走：2021 的题用默认 3.9，2023 的（flask 2.3）
+要 `PYVER=3.11 ./run.sh ...`，否则 uv 解不出可用的 wheel。
+
+arm 名可以带后缀（`A-5063-1`、`B-5063-1`），`prompt.py` 按首字母判 arm，
+`run.sh` 会把这次用的 `instance.json` 复制进 run 目录。两个 arm 可以同时跑。
 
 ### 2. clone 仓库（只需一次）
 
@@ -159,7 +166,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest -q tests/test_blueprints.py tests
 | `trace.jsonl` | 完整事件流（`pi --mode json` 的输出） |
 | `patch.diff` | agent 改出来的代码，已排除 `.pi/`，可直接当 SWE-bench 的 `model_patch` |
 | `prompt.txt` | 实际发给 agent 的提示 |
-| `langfuse.txt` | 这次运行的 langfuse trace id 和 task run id |
+| `langfuse.txt` | task run id，以及跑完回查到的 trace id / session id 和直达 URL |
 | `memo-global/` | 全局 store（隔离的） |
 | `workspace/.pi/memo/` | 项目 store |
 | `workspace/.venv/` | 任务的 Python 环境（uv 按 instance 日期建） |
@@ -171,14 +178,38 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest -q tests/test_blueprints.py tests
 `run.sh` 会显式加载 `@amaster.ai/pi-telemetry`（`-ne` 会跳过 pi package，所以要单独 `-e`），
 凭据仍然从 `~/.pi/agent/settings.json` 的 `pi-telemetry` 段读，脚本不碰。
 
-每次运行固定一个 trace id 并写进 `runs/<ARM>/langfuse.txt`：
+每个 span 带上 `task_run_id = agent-smoke/<ARM>/<instance_id>`，langfuse 存成
+`metadata.taskRunId`。**这是唯一可靠的定位方式**：在 Traces 列表里按 Metadata 筛
+`taskRunId = agent-smoke/<ARM>/<instance_id>`，或走 API：
 
 ```bash
-cat runs/A/langfuse.txt
+curl -s -u "$PK:$SK" "https://us.cloud.langfuse.com/api/public/traces?limit=20" \
+  | python3 -c "import json,sys; [print(t['timestamp'], t['id'], (t.get('metadata') or {}).get('taskRunId')) for t in json.load(sys.stdin)['data']]"
 ```
 
-同时每个 span 带上 `task_run_id = agent-smoke/<ARM>/<instance_id>`，用它可以在 langfuse 里
-把评测运行和日常使用分开筛。没装 telemetry 包时脚本会打印 `langfuse: skipped` 并照常跑完。
+不过一般不用手查：`run.sh` 跑完会调 `langfuse_lookup.py` 按 taskRunId 回查一次，把
+**trace id、session id 和两个直达 URL** 追加进 `runs/<ARM>/langfuse.txt`：
+
+```
+task_run_id: agent-smoke/A-5063-1/pallets__flask-5063
+
+trace_id:    7f6bc28a4f91fb45368475e74c049f8a
+session_id:  cfdbda0d-28b5-4972-bedc-b23bd31a88ca
+trace_url:   https://us.cloud.langfuse.com/project/<pid>/traces/<trace_id>
+session_url: https://us.cloud.langfuse.com/project/<pid>/sessions/<session_id>
+```
+
+trace id 和 session id **都是扩展自己生成的、跑之前不可知**（session id 是扩展初始化时的
+`randomUUID()`），所以只能事后按 taskRunId 回查。这一步会读 `~/.pi/agent/settings.json` 里的
+langfuse 凭据——只读、只发给那里配置的 baseUrl、不打印；查不到或没配就打一行说明，不影响 run。
+ingestion 有批处理延迟，脚本最多等 60 秒。
+
+**不要用旧的 `trace_id` 字段**：脚本以前设 `PI_TELEMETRY_TRACE_ID` 想固定 trace id，但
+pi-telemetry 只在 `input` 事件里应用这个预设值（`dist/extension.js:216`），`pi -p` 走不到那儿，
+于是回退成随机 id（第 227–228 行）——写进 `langfuse.txt` 的那个 id 在 langfuse 里查不到（404）。
+现在脚本不再设它，只记 task run id 和开始时间。
+
+没装 telemetry 包时脚本会打印 `langfuse: skipped` 并照常跑完。
 
 **主问题——它调了哪些工具：**
 
@@ -232,6 +263,7 @@ pi-memo 就活在中间那两段里。改过 `src/tools/*.ts` 的提示文案之
 |---|---|
 | `dump_system_prompt.ts` | 打印 agent 实际看到的系统提示（含 pi-memo 注入的工具行和 guideline）；零成本，不调 LLM |
 | `export_instance.py` | parquet → `instance.json` |
+| `langfuse_lookup.py` | 跑完按 task run id 回查 trace/session id，写进 `langfuse.txt` |
 | `prompt.py` | `instance.json` + arm → 提示词 |
 | `run.sh` | 建截断历史的 workspace、隔离 store 与网络、跑 pi、抓 patch |
 | `instance.json` | 当前这道题（已生成，可提交） |

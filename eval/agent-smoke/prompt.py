@@ -33,7 +33,8 @@ def main() -> None:
         f"  problem_statement: {inst['problem_statement']}"
     )
 
-    if arm == "B":
+    # Run dirs carry suffixes ("B-5063-1"), so match the arm letter, not the whole name.
+    if arm.upper().startswith("B"):
         prompt += NUDGE
 
     sys.stdout.write(prompt)
