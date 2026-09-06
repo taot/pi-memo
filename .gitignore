@@ -5,3 +5,6 @@ data/
 .ipynb_checkpoints/
 eval/agent-smoke/repos/
 eval/agent-smoke/runs/
+eval/swe-contextbench-stream/repos/
+eval/swe-contextbench-stream/runs/
+eval/swe-contextbench-stream/gold/

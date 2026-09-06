@@ -1,0 +1,49 @@
+run_id:    main
+arm:       persistent
+started:   2026-09-06T22:11:12Z
+pi_memo:   7974ec6b572a551e667496c978e67aaf70911438
+extension: /home/taot/github/pi-memo/index.ts
+sympy:     ad538b41ffe5316fc13464920f3f8c823573d12a
+clusters:  C3 sympy__sympy-21055 sympy__sympy-21203 sympy__sympy-21309 sympy__sympy-9384
+
+
+########## C3: sympy__sympy-21055 -> sympy__sympy-21203 sympy__sympy-21309 sympy__sympy-9384
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+instance:  sympy__sympy-21055
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/experience/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/stores/global
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+experience: 19 tool calls  recall=0  write=0  revise=0  forget=0
+sympy__sympy-21055: resolved=True F2P 1/1  P2P 13/13  (5s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/experience
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+instance:  sympy__sympy-21203
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21203/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21203/global-store
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+related-sympy__sympy-21203: 36 tool calls  recall=0  write=1  revise=0  forget=0
+sympy__sympy-21203: resolved=False F2P 2/3  P2P 124/124  (68s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21203
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+instance:  sympy__sympy-21309
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21309/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21309/global-store
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+related-sympy__sympy-21309: 0 tool calls  recall=0  write=0  revise=0  forget=0
+sympy__sympy-21309: resolved=False F2P 0/2  P2P 320/320  (199s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-21309
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+instance:  sympy__sympy-9384
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-9384/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-9384/global-store
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+related-sympy__sympy-9384: 0 tool calls  recall=0  write=0  revise=0  forget=0
+sympy__sympy-9384: resolved=False F2P 0/2  P2P 320/320  (208s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C3/related-sympy__sympy-9384
+
+wrote /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/results.json and /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/report.md
+  related resolved 0/8, reused an experience entry 3/8

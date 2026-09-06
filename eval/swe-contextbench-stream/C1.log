@@ -1,0 +1,72 @@
+run_id:    main
+arm:       persistent
+started:   2026-09-06T22:10:32Z
+pi_memo:   7974ec6b572a551e667496c978e67aaf70911438
+extension: /home/taot/github/pi-memo/index.ts
+sympy:     ad538b41ffe5316fc13464920f3f8c823573d12a
+clusters:  C1 sympy__sympy-12419 sympy__sympy-12426 sympy__sympy-12427
+
+
+########## C1: sympy__sympy-12419 -> sympy__sympy-12426 sympy__sympy-12427
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:873: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:967: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Mapping
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if feasible is 1:  # it's prime and k == 2
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Callable
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+instance:  sympy__sympy-12419
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/stores/global
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+experience: 42 tool calls  recall=0  write=1  revise=0  forget=0
+sympy__sympy-12419: resolved=True F2P 1/1  P2P 25/25  (2s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/experience
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:873: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:967: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Mapping
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if feasible is 1:  # it's prime and k == 2
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Callable
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+seeded project store from /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/stores/project-after-experience
+instance:  sympy__sympy-12426
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426/global-store
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+related-sympy__sympy-12426: 15 tool calls  recall=1  write=1  revise=0  forget=0
+sympy__sympy-12426: resolved=False F2P 0/1  P2P 2/2  (1s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12426
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:873: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace/.venv/lib/python3.9/site-packages/mpmath/ctx_mp_python.py:967: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if other is 0:
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Mapping
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if feasible is 1:  # it's prime and k == 2
+/home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
+  from collections import Callable
+sandbox denyRead: ['/usr/lib/python3.14/site-packages/sympy']
+seeded project store from /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/stores/project-after-experience
+instance:  sympy__sympy-12427
+workspace: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/workspace
+memo home: /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427/global-store
+sandbox:   /home/taot/.pi/agent/npm/node_modules/pi-sandbox/index.ts (network: deny all)
+running pi...
+related-sympy__sympy-12427: 13 tool calls  recall=1  write=0  revise=0  forget=0
+sympy__sympy-12427: resolved=False F2P 0/3  P2P 81/81  (497s)
+done -> /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/C1/related-sympy__sympy-12427
+
+wrote /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/results.json and /home/taot/github/pi-memo/eval/swe-contextbench-stream/runs/main/report.md
+  related resolved 0/8, reused an experience entry 3/8
