@@ -506,3 +506,41 @@ git ls-remote https://github.com/pallets/flask.git refs/pull/5063/head   # 被�
 沙箱拦住了这次，但换成允许网络的评测配置，这条路比翻 git 历史还短。
 
 两个 arm 都改了 `tests/test_cli.py`（结论 3 提过的老问题）：提交 patch 时要按路径过滤。
+
+## 结论 9：加长 CLOSING_NUDGE 没有稀释，但也没换来更泛化的记忆
+
+结论 3 证明的是**位置**（尾部）有效，长度从没测过。把 `CLOSING_NUDGE` 从一句
+（"store anything you learned that would have saved you time at the start… Nothing
+worth keeping is a valid outcome."）换成 `memory_write` guideline 的完整措辞（三句，
+带正面清单和 skip 清单），于是有了这个问题：更长会不会把它自己稀释掉。
+
+对照跑法：同一道题（`pallets__flask-5063`）、同一个 arm A、n=3+3，两组交替启动避免时间漂移。
+对照组用 `git archive 3769131` 解出的旧扩展，靠 `run.sh` 新加的 `MEMO_EXT` 指过去
+（每个 run 的 `extension-path.txt` 记着用的是哪个）。
+
+| 组 | nudge | 工具调用 | **写入** |
+|---|---|---|---|
+| `A-short-1..3` | 旧的一句话 | 29 / 22 / 28 | **0/3** |
+| `A-long-1..3` | 新的三句话 | 29 / 41 / 36 | **2/3** |
+
+**没有稀释**，方向反而相反。n=3 说明不了因果（同一批 `A-5063-1` 在旧措辞下也写过一条，
+所以旧的实际是 1/4），但至少可以排除"加长把它冲没了"这个担心。
+
+### 但泛化那部分没生效
+
+两条新写的记忆和 `A-5063-1` 那条几乎是同一条：
+
+```
+routes-domain-column-backward-compatible     (A-long-2)
+routes-domain-column-backward-compatibility  (A-long-3)
+  只有当至少一条规则有非空 domain 时才加 Domain 列，否则保持三列输出……
+```
+
+这正是"加 Domain 列时怎么保住原输出"——这道题的解法，换一道题用不上，和结论 8 里
+被点名的那条同类。我们加进 nudge 的正面清单（non-obvious cause / constraint that shaped
+the fix / approach that worked after others failed）和 "skip a narration of what you just
+did" 都没能把它推向更泛化的东西。
+
+一个可能的解释：这条经验**确实**符合"a constraint that shaped the fix"——约束是真的，
+只是这个约束本身就只属于这道题。清单筛的是"是不是显而易见/是不是流水账"，
+不是"换个任务还用不用得上"。要拿到后者，得直接把**复用范围**写进判据，而不是靠形容词。

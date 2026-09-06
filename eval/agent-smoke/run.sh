@@ -9,6 +9,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ARM="${1:-A}"
+# MEMO_EXT: which build of pi-memo to load. Defaults to this checkout; point it at
+# another tree (e.g. `git archive <sha>` unpacked with node_modules symlinked) to run
+# an arm against an older version of the extension.
+MEMO_EXT="${MEMO_EXT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/index.ts}"
 RUN="$HERE/runs/$ARM"
 
 # CREATED_AT dates the dependency resolution, so the env matches what the instance
@@ -68,6 +72,7 @@ fi
 python3 "$HERE/prompt.py" "$ARM" > "$RUN/prompt.txt"
 # instance.json is rewritten whenever the task changes; keep the one this run used.
 cp "$HERE/instance.json" "$RUN/instance.json"
+echo "$MEMO_EXT" > "$RUN/extension-path.txt"
 
 # Isolated global store. The project store lands in workspace/.pi/memo.
 export PI_MEMO_HOME="$RUN/memo-global"
@@ -168,6 +173,7 @@ else
 fi
 
 echo "arm:       $ARM"
+echo "extension: $MEMO_EXT"
 echo "workspace: $RUN/workspace"
 echo "memo home: $PI_MEMO_HOME"
 echo "langfuse:  $LANGFUSE_NOTE"
@@ -177,7 +183,7 @@ echo "running pi..."
 # -ne/-ns/-nc: load nothing but pi-memo, pi-sandbox and, when present, telemetry.
 cd "$RUN/workspace"
 pi -p --mode json -ne -ns -nc \
-  -e "$REPO_ROOT/index.ts" -e "$SANDBOX" ${telemetry_args[@]+"${telemetry_args[@]}"} \
+  -e "$MEMO_EXT" -e "$SANDBOX" ${telemetry_args[@]+"${telemetry_args[@]}"} \
   "$(cat "$RUN/prompt.txt")" \
   > "$RUN/trace.jsonl" 2> "$RUN/stderr.log" || echo "pi exited non-zero (see stderr.log)"
 
