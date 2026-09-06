@@ -19,26 +19,47 @@ d = json.load(open(sys.argv[1]))
 print(d['instance_id'], d['base_commit'], d['created_at'])
 " "$HERE/instance.json")"
 
-# Fresh workspace: the tree at base_commit and nothing else. A worktree of
-# repos/flask would share its object database and all of its refs, which lets the
-# agent find the upstream fix with `git log --all` and copy it -- see NOTES.md.
+# Fresh workspace: real history truncated at base_commit. A worktree (or a plain
+# clone) of repos/flask shares every ref, which lets the agent find the upstream fix
+# with `git log --all` and copy it -- see NOTES.md. The earlier fix went the other
+# way and gave the agent a single synthetic commit, which removes the leak but also
+# removes something a real checkout has: the repository's own past. A shallow clone
+# of a branch pinned at base_commit gives the true history up to base and nothing
+# after it.
+#
+# file:// (not a plain path) forces the git transport: a local-path clone hardlinks
+# the whole object database and ignores --depth.
+DEPTH="${DEPTH:-500}"
+SNAP_BRANCH="eval-snapshot-$INSTANCE"
 rm -rf "$RUN"
 # Clears registrations left behind by worktrees from earlier versions of this script.
 git -C "$HERE/repos/flask" worktree prune
-mkdir -p "$RUN/workspace"
-git -C "$HERE/repos/flask" archive --format=tar "$BASE" | tar -x -C "$RUN/workspace"
-git -C "$RUN/workspace" init --quiet -b main
-# -f: flask's own .gitignore covers tracked fixtures (tests/test_apps/.env,
-# .flaskenv), which plain `add -A` would leave untracked and out of the diff.
-git -C "$RUN/workspace" add -A -f
-# -c so the run does not depend on the user's global git identity.
-git -C "$RUN/workspace" \
-	-c user.name="eval" -c user.email="eval@localhost" \
-	commit --quiet -m "$INSTANCE base $BASE"
+mkdir -p "$RUN"
+git -C "$HERE/repos/flask" branch -f "$SNAP_BRANCH" "$BASE"
+git clone --quiet --depth "$DEPTH" --single-branch --branch "$SNAP_BRANCH" \
+	"file://$HERE/repos/flask" "$RUN/workspace"
+git -C "$HERE/repos/flask" branch -q -D "$SNAP_BRANCH"
+# The clone is self-contained (no alternates), so dropping the remote leaves nothing
+# pointing back at the full repo -- and no remote-tracking ref to fetch from.
+git -C "$RUN/workspace" remote remove origin
+git -C "$RUN/workspace" branch -m "$SNAP_BRANCH" main
 
-# The whole point of the snapshot: one commit, no remotes, no future refs.
-if [ "$(git -C "$RUN/workspace" rev-list --count HEAD)" != 1 ]; then
-	echo "workspace is not a clean snapshot" >&2
+# The whole point of the truncation: HEAD is base, history is real but shallow, and
+# nothing outside base's ancestry is reachable from any ref.
+if [ "$(git -C "$RUN/workspace" rev-parse HEAD)" != "$BASE" ]; then
+	echo "workspace HEAD is not $BASE" >&2
+	exit 1
+fi
+if [ ! -f "$RUN/workspace/.git/shallow" ]; then
+	echo "workspace clone is not shallow" >&2
+	exit 1
+fi
+if [ -n "$(git -C "$RUN/workspace" rev-list --all --not HEAD)" ]; then
+	echo "workspace has commits outside base's ancestry" >&2
+	exit 1
+fi
+if [ -n "$(git -C "$RUN/workspace" remote)" ]; then
+	echo "workspace still has a remote" >&2
 	exit 1
 fi
 

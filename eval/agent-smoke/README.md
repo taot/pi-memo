@@ -28,7 +28,7 @@
 ## 跑之前要清理什么
 
 短答案：**基本不用手动清理**，`run.sh` 每次会把对应 arm 的目录整个删掉重建
-（`rm -rf runs/<ARM>` → `git archive` 出 tree → `git init` + 单次 commit）。
+（`rm -rf runs/<ARM>` → 从 `repos/flask` 浅克隆一个钉在 `base_commit` 的分支）。
 
 真正要留意的只有两件事：
 
@@ -76,14 +76,23 @@ mkdir -p repos && git clone https://github.com/pallets/flask.git repos/flask
 约 16MB。全量历史包含了**修复这道题的上游 commit**，所以这个 clone 只当 tree 的来源用，
 它的历史和 refs 不进 workspace。
 
-`run.sh` 用 `git archive` 取出 `base_commit` 的 tree，再 `git init` + 单次 commit，
-workspace 因此是一个**只有一个 commit、没有 remote、没有未来 refs** 的独立仓库。
+`run.sh` 在 `repos/flask` 里把一个临时分支钉到 `base_commit`，然后
+`git clone --depth 500 --single-branch --branch <该分支> file://...`，再删掉 remote。
+workspace 因此有**到 base 为止的真实历史**、没有 remote、没有未来 commit 和未来 tag
+（`--single-branch` 只带回该分支历史里的 tag，最新一个是 `2.0.0`）。
+`file://` 是必须的：本地路径克隆会硬链接整个 object DB 并忽略 `--depth`。
+
 早先的版本用 `git worktree`，workspace 与 clone 共享 object DB 和全部 refs，agent
-`git log --all` 就能翻出上游修复直接抄——见 NOTES.md 结论 2。想确认没退化：
+`git log --all` 就能翻出上游修复直接抄——见 NOTES.md 结论 2；再早先的修法是
+`git archive` + 单次 commit，堵住了泄漏，但也把仓库自己的历史一并拿走了（结论 7）。
+
+脚本自己断言 HEAD == base、克隆是 shallow、`rev-list --all --not HEAD` 为空、没有 remote，
+四条任一不成立就退出。想手动确认没退化：
 
 ```bash
-git -C runs/A/workspace rev-list --count HEAD    # 1
-git -C runs/A/workspace log --all --grep='blueprint name'   # 空
+git -C runs/A/workspace rev-parse HEAD            # = instance.json 的 base_commit
+git -C runs/A/workspace rev-list --all --not HEAD | wc -l   # 0
+git -C runs/A/workspace log --all -S'may not contain a dot' -- src/flask/blueprints.py  # 空
 ```
 
 ### 3. 网络隔离（自动，但有前置依赖）
@@ -224,7 +233,7 @@ pi-memo 就活在中间那两段里。改过 `src/tools/*.ts` 的提示文案之
 | `dump_system_prompt.ts` | 打印 agent 实际看到的系统提示（含 pi-memo 注入的工具行和 guideline）；零成本，不调 LLM |
 | `export_instance.py` | parquet → `instance.json` |
 | `prompt.py` | `instance.json` + arm → 提示词 |
-| `run.sh` | 建快照 workspace、隔离 store 与网络、跑 pi、抓 patch |
+| `run.sh` | 建截断历史的 workspace、隔离 store 与网络、跑 pi、抓 patch |
 | `instance.json` | 当前这道题（已生成，可提交） |
 | `NOTES.md` | 跑完的结论 |
 | `repos/`、`runs/` | 本地产物，已 gitignore |

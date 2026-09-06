@@ -1,8 +1,0 @@
-{
-  "filesystem": {
-    "allowRead": [
-      "/home/taot/.nvm/versions/node/v24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md",
-      "/home/taot/.nvm/versions/node/v24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/tui.md"
-    ]
-  }
-}

@@ -399,3 +399,55 @@ agent 改测试要么被覆盖要么冲突。后续要么在提示里禁止改�
 
 `git diff -- . ':(exclude).pi'` 已经能正确排除 pi-memo 自己写进 workspace 的
 `.pi/memo/`，这一处接缝是通的。
+
+## 结论 7：workspace 换成历史截断，泄漏没有回来
+
+结论 2 的修法（`git archive` + 单次 commit）堵住了未来提交，代价是把仓库自己的过去也拿走了：
+agent 拿到的是一个只有一个合成 commit 的仓库，`git log` 什么也讲不了。结论 4 末尾已经写明
+正确做法是**历史截断**——给到 base 为止的真实历史，不给之后的。
+
+`run.sh` 现在这样建 workspace：
+
+```bash
+git -C repos/flask branch -f eval-snapshot-<instance> <base>
+git clone --depth 500 --single-branch --branch eval-snapshot-<instance> \
+    "file://.../repos/flask" runs/<ARM>/workspace
+git -C runs/<ARM>/workspace remote remove origin
+```
+
+两个必须踩对的点：
+
+- **`file://` 不能省**。本地路径克隆走的是硬链接/copy 路径，会带上整个 object DB 并**忽略
+  `--depth`**，等于把 worktree 那个泄漏原样搬回来。
+- **`--single-branch` 顺带管住了 tag**。默认 clone 会拉全部 tag，其中包含 base 之后的版本；
+  单分支模式只带回该分支历史里的 tag，实测最新是 `2.0.0`（base 正好在 2.0 发布之后）。
+
+脚本的断言也跟着换掉了（原来是 `rev-list --count HEAD == 1`）：HEAD 必须等于 `base_commit`、
+`.git/shallow` 必须存在、`rev-list --all --not HEAD` 必须为空、不能有 remote。
+
+### 重跑 arm A（`runs/A-hist-1`）
+
+| 项 | 结果 |
+|---|---|
+| 工具调用 | 96（bash 72 / read 20 / edit 4） |
+| `memory_*` | **0** |
+| patch | `src/flask/blueprints.py` 一个文件，+3 行 |
+| pytest | 跑了 |
+| `net-blocked` | 6 |
+
+**泄漏没有回来。** agent 明确去找过未来历史，五条命令全落空：
+
+```
+git remote -v && git branch -a --contains d8c37f43...
+git tag --contains HEAD | head; git show-ref | head
+git tag --sort=version:refname | tail -20 && git fsck --no-reflogs --unreachable
+```
+
+`git log --all -S"may not contain a dot" -- src/flask/blueprints.py` 事后复查也是 0 条。
+另外 6 次外联尝试全部被沙箱拦下——它还是先找路，路仍然没有。
+
+产出的 patch 就是 gold 的形状（只改 `blueprints.py`），没有 `CHANGES.rst` 和测试文件，
+和 `A-net-*`/`A-env-*` 一致，不是 `A-tail-*` 那种上游 commit 的四文件复刻。
+
+写入仍然是 0/1。这和 `A-env-1..4` 的 1/4 在同一区间，n=1 说明不了别的；历史截断是把
+workspace 变得**更像真实仓库**，不是为了提高写入率。
