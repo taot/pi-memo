@@ -123,3 +123,227 @@ gold gate 的 venv 仍在外面 —— 它在两个半场之间重建 workspace�
 
 这三条只能从 pre 那一遍得到：只跑 post 的话，看到测试红，无法区分「本来就红」和
 「patch 改坏了」，想排除都不知道排除什么 —— 那 3 个实例会被误判为不可用。
+
+## 结论 6：`12426` 的失败不是能力问题，是题目没说全
+
+用空 store 单跑 `sympy__sympy-12426`（11 行、单文件、1 个 F2P，和 experience 同量级）
+做判别实验。结果 `resolved=False`，但补丁和 gold 只差一个索引。
+
+gold：
+
+```python
+def _entry(self, i, j):
+    eq = Eq(i, j)
+    if eq is S.false:   return S.Zero
+    elif eq is S.true:  return self.arg[i, i]
+    return self.arg[i, j]*KroneckerDelta(i, j)
+```
+
+agent（18 次工具调用，90 秒）：
+
+```python
+def _entry(self, i, j):
+    eq = Eq(i, j)
+    if eq is S.true:    return self.arg[i, 0]
+    elif eq is S.false: return S.Zero
+    return self.arg[i, 0]*KroneckerDelta(i, j)
+```
+
+`Eq(i,j)` 三分支 + `KroneckerDelta(i,j)` 这个非显然的结构，**它自己推出来了，
+和 gold 逐 token 对得上**（分支顺序不同但等价）。差的只有 `arg[i, 0]` vs `arg[i, i]`。
+
+而那个差别来自 test_patch 里一处 issue **完全没提**的改动：
+
+```diff
+-x = MatrixSymbol('x', n, 1)      # 列向量
+-D = DiagonalMatrix(x)
++X = MatrixSymbol('X', n, n)      # 方阵
++D = DiagonalMatrix(X)
+     assert D[1, 2] == 0
+-    assert D[1, 1] == x[1, 0]
++    assert D[1, 1] == X[1, 1]
+```
+
+题面只抱怨 `d[i,j]` 返回 0。它没说「顺便把被包裹参数从列向量改成方阵」。
+agent 保留了原有的 `arg[i, 0]` —— 那正是改动前的代码和**改动前的测试**所断言的。
+
+**关键：agent 结构上不可能验证。** SWE-bench 式评测不把 test_patch 给 agent，
+F2P 测试在它的树里根本不存在。它跑了现有测试（3 passed / 122 passed），全绿，
+于是收尾："Implemented the fix."。**它是自己判断做完了才停的，不是撞到预算上限**
+（18 次调用，远低于其他 related 运行的 21–68 次）。
+
+它甚至自己加了回归测试 —— 而 `grade.py` 会把测试文件还原，这是对的（agent 不能自己
+定判分标准），但也意味着它的自检回路和真正的判分标准之间**结构性地隔着一层**。
+
+### 对评测设计的影响
+
+这一道说明：related 任务的 F2P 可能编码了 issue 文本里没有的要求。那么 resolve rate
+测的就有一部分是「猜中了隐藏测试」，而不是「记忆用得好」。**这削弱的是下游指标本身**，
+和有没有基线无关。
+
+也顺带说明记忆在这道题上帮不上忙：C1 experience 写的 `symbolic-nested-kronecker-sums`
+讲的正是 KroneckerDelta —— 而那部分 agent 本来就做对了。它不会告诉 agent
+`arg` 该按方阵索引。这和上一轮「12426 召回了该条记忆、仍然 0/1」是一致的。
+
+### 两条隔离措施都生效了
+
+- `git ls-remote https://github.com/sympy/sympy.git 'refs/pull/12426/*'` —— 它确实去猜了
+  PR 号（结论 8 说的那条路），被沙箱拦下（外联 1 次 / 拒 1 次）
+- 系统 sympy 引用 **0 次**，`denyRead` 守住了
+
+### 但这一道解释不了另外 7 道
+
+那 7 道的 gold patch 是 131–176 行、最多 6 个文件。`12426` 的结论不能外推过去 ——
+要判断它们，得看失败补丁离 gold 有多远，而那需要重跑。
+
+## 结论 7：`16946` 是另一种失败 —— 规格不在题面里，agent 改了 4 行就宣布完成
+
+同样用空 store 单跑。`resolved=False`，**F2P 0/6**（上一轮能读系统 sympy 时是 **4/6**）。
+
+| | agent | gold |
+|---|---|---|
+| 补丁 | 1 文件 / **4 行** | 2 文件 / **69 行**（15 个 hunk） |
+
+它做的全部是把两处类属性 `is_EmptySet` 改名成 `is_empty`。gold 要的是给
+`Rationals`/`Naturals`/`Naturals0`/`Integers`/`ImageSet` 各加 `is_empty`、给
+`Interval`/`ProductSet`/`Union`/`Complement`/`FiniteSet`/`UniversalSet` 算出
+`is_empty`、外加 `is_EmptySet` 的弃用垫片。然后它收尾：
+
+> Implemented the `is_EmptySet` → `is_empty` replacement. ... **74 passed, 4 expected failures**.
+
+37 次工具调用、166 秒，**同样是自己判断做完了才停的**，不是撞预算。
+
+### 4/6 → 0/6：上一轮那个最高的 related 分数主要是抄来的
+
+这是本次最干净的一个数字。`denyRead` 装上之后，系统 sympy 引用 0 次，分数从 4/6 掉到 0/6。
+
+### 隔离现在是完整的
+
+37 次调用里约 15 次在找答案，每一条路都封死了：
+
+```
+urllib → api.github.com                          被拦
+pip download / uv pip install sympy==1.5         被拦
+find /usr/lib -path '*/sympy/sets/...'           denyRead 挡住
+find /home/taot -path '*/sympy/sets/sets.py'     返回空
+git tag --contains / fsck / ancestry-path / log --all -S   全空
+find /home/taot/github/pi-memo -iname '*16946*'  只看见目录名
+```
+
+最后一条一度让人紧张 —— 它找到了 `runs/probe-16946-nomem` 这个目录，而 `instance.json`
+（含 gold patch、test_patch、F2P 清单）就在里面。用探针确认过，**读不到**：
+
+```
+ls  .../runs/probe-16946-nomem/  →  workspace      （只有这一项）
+head .../instance.json           →  No such file
+head .../subset.json             →  No such file
+```
+
+bubblewrap 只把 workspace 挂进 namespace，同级文件在里面不存在；那个目录之所以可见，
+只因为它是被挂载路径的父目录。默认的 `denyRead: ["/home"]` + `allowRead: ["."]`
+恰好给出了正确结果。**结论：eval 自己的文件不是泄漏面。**
+
+### 两道题的病因不同
+
+| | `12426` | `16946` |
+|---|---|---|
+| 差距 | 一个索引 | 缺 95% |
+| 病因 | 题面没提 fixture 语义变更 | 规格在被沙箱拦住的 GitHub 链接后面 |
+| 判定 | **不是能力问题** | 题目缺陷 + agent 的**校准**问题（改 4 行就宣布完成） |
+
+共同的结构性原因只有一个：**agent 看不到 F2P，而 issue 文本不足以推出契约。**
+在 `12426` 上这代价是一个索引，在 `16946` 上是整套 API 设计。
+
+## 结论 8：`16946` 的 0/6 是规格问题，不是能力问题 —— 给了测试就 6/6
+
+`oracle-test` 诊断轨道（`run_instance.sh --oracle-test`：把官方 test_patch 打进 workspace，
+prompt 末尾加一句「仓库里已有失败的测试，跑它们，让它们通过」）。同一道题、同一个 agent、
+同样的空 store：
+
+| | 默认（看不到测试） | `--oracle-test` |
+|---|---|---|
+| resolved | False | **True** |
+| F2P | **0/6** | **6/6** |
+| P2P | 150/150 | 150/150 |
+| 补丁 | 1 文件 / 4 行 | **2 文件 / 64 行** |
+| 工具调用 | 37 | **41** |
+| 外联尝试 | 2（都被拦） | **0** |
+
+gold 是 2 文件 / 69 行。agent 在 oracle 轨道下改的位置和 gold 几乎一一对应
+（`Rationals`/`Naturals`/`Integers`/`ImageSet`/`Range` 加 `is_empty`，`Set` 基类加属性和
+弃用垫片，`Interval`/`EmptySet`/`UniversalSet`/`FiniteSet` 各自算 `is_empty`）。
+
+**三个变量因此分离干净：**
+
+- **能力**：够。给了规格就做得出来，补丁规模和形状都对得上 gold。
+- **预算**：够。41 次调用 vs 37 次，几乎没多花 —— 不是没跑完。
+- **规格**：这就是全部缺口。0/6 → 6/6，唯一的差别是规格可见。
+
+还有一个旁证：默认轨道下它 2 次尝试外联、约 15 次调用在翻 git 历史和系统目录找答案；
+oracle 轨道下**外联 0 次**。**那些找答案的行为不是投机，是缺规格的症状。**
+
+### 这对评测设计意味着什么
+
+好消息：信息缺口真实存在且很大（0/6 → 6/6）。**这正是记忆原则上能填的那种缺口。**
+
+坏消息：得先确认「经验题里真的含有待测题需要的那份知识」。C2 的 experience 是
+`16988`（FiniteSet 与 Symbol 的交集），和 `16946` 要的 `is_empty` API 契约是两回事 ——
+它写下的还是 harness lore（`legacy-sympy-xfail-pytest-noise`）。**关联表里的「引用关系」
+不等于「共享知识」。** 这是继泄漏（118 对同 PR）和时序（只有 31% 经验更早）之后，
+关联表的第三个问题，而且没法用元数据筛掉，只能看内容。
+
+### `--oracle-test` 不进主结果
+
+它量的是上限。默认轨道绝不能给测试：测试就是判分标准，交出去等于把任务从「修好这个 bug」
+变成「让这几个断言通过」；对这个评测更致命的是，**它会删掉记忆本该填的那个信息缺口** ——
+`fresh` 和 `persistent` 两臂会因为一个和记忆无关的原因得到同样的分数。
+
+## 结论 9：关联表还有两个缺陷，前两条筛选都没盖住
+
+`screen_pairs.py` 在那 32 对 clean pair 上又找出两种，**10 对中招**：
+
+**一、related 的题面和 experience 的题面逐字相同。**
+`psf__requests-3362 → 3359` 就是这样：PR 号不同、日期差三个月，但那是同一个 bug 报告的
+两次修复尝试，改的是 `requests/utils.py` 里**同一段代码的相反方向** —— experience 给
+`stream_decode_response_unicode` 加 `apparent_encoding` 兜底，related 把那个分支整个删掉、
+把检查挪进 `iter_content`。把这种"经验"交出去，等于把答案所在的那几行圈出来。
+`xarray 3364 → 508`、`matplotlib 22711 → 22686` 同病。
+
+**二、同一个 experience 下的两道 related，gold patch 逐字节相同。**
+两道"不同"的题其实是同一道，跑两遍只是把同一个观测数了两次。
+
+### 我原来那个子集因此报废
+
+跑过的 8 道 related 里：
+
+```
+16342 ≡ 16953   gold patch 逐字节相同   （实测确认）
+21309 ≡ 9384    gold patch 逐字节相同   （实测确认）
+```
+
+**实际只有 6 道不同的题，不是 8 道。** 加上结论 2 的地板效应和结论 8 的知识不重合
+（C3 三对的共享文件数和共享符号数都是 **0**），这个子集三条都占了。
+
+### 四条筛选之后，Lite 干净集基本被抽干
+
+32 对 → 剔掉 10 对 → 剩下的里面，**只有 `scikit-learn 10949 → {12622, 15093}` 还是
+一对多**（两道 related 的 gold patch 分别是 8 行和 6 行），其余全是 1:1。
+1:1 不是不能用，只是每个观测要花两次 agent 运行。
+
+### 排名第一的候选：`sympy 14774 → 19235`
+
+```python
+# experience 14774: sympy/printing/latex.py::_print_Function
+- inv_trig_table = ["asin", "acos", "atan", "acot"]
++ inv_trig_table = ["asin", "acos", "atan", "acsc", "asec", "acot"]
+
+# related 19235（696 天后）: 同一文件、同一函数、同一个列表
++ inv_trig_table = [..., "asinh", "acosh", "atanh", "acsch", "asech", "acoth"]
+```
+
+related 补丁 7 行、单文件，共享文件和共享符号都命中，题面还明写 "Follows on from gh-14774"。
+记忆里能带走的是**位置和机制**，「加哪几个函数」来自题面 —— 这不是泄漏，是可迁移知识该有的样子。
+它的 `spec_behind_url` 是误报：那个 URL 是 sympy PR 模板里讲 issue 自动关闭约定的样板文字。
+
+需要注意的反向风险：这道题可能**太好做**（`rg inv_trig_style` 一条命令就能定位），
+于是从地板跳到天花板，同样没有动态范围。得实测。

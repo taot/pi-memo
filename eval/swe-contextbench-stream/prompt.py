@@ -14,15 +14,29 @@ import sys
 
 import instance
 
+# Diagnostic track only (run_instance.sh --oracle-test). The default eval never
+# shows the agent the official tests: they are the grading criterion, and handing
+# them over turns "fix the bug" into "make these assertions pass" -- and, for this
+# eval specifically, deletes the information deficit that memory is supposed to
+# fill, so both arms would score alike for a reason that has nothing to do with
+# memory. This exists to measure a ceiling: given an unambiguous specification,
+# can the agent do the task at all?
+ORACLE_SUFFIX = (
+    "\n\nThe repository already contains failing tests that specify the expected "
+    "behavior. Run them, and make them pass."
+)
+
 
 def main() -> None:
     inst = instance.load(sys.argv[1])
+    oracle = "--oracle-test" in sys.argv[2:]
     sys.stdout.write(
         "Fix this bug to solve the issue based on manual.yaml:\n"
         f"  instance_id: {inst['instance_id']}\n"
         f"  repo: {inst['repo']}\n"
         f"  base_commit: {inst['base_commit']}\n"
         f"  problem_statement: {inst['problem_statement']}"
+        + (ORACLE_SUFFIX if oracle else "")
     )
 
 

@@ -20,7 +20,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib.sh"
 
-INSTANCE="" RUN="" GLOBAL_STORE="" PROJECT_SEED="" PROJECT_OUT=""
+INSTANCE="" RUN="" GLOBAL_STORE="" PROJECT_SEED="" PROJECT_OUT="" ORACLE_TEST=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--instance) INSTANCE="$2"; shift 2 ;;
@@ -28,6 +28,8 @@ while [ $# -gt 0 ]; do
 		--global-store) GLOBAL_STORE="$2"; shift 2 ;;
 		--project-seed) PROJECT_SEED="$2"; shift 2 ;;
 		--project-out) PROJECT_OUT="$2"; shift 2 ;;
+		# Diagnostic track, NOT the eval. See prompt.py's ORACLE_SUFFIX.
+		--oracle-test) ORACLE_TEST=1; shift ;;
 		*) echo "unknown argument: $1" >&2; exit 1 ;;
 	esac
 done
@@ -82,7 +84,19 @@ if [ -n "$PROJECT_SEED" ] && [ -d "$PROJECT_SEED" ]; then
 	echo "seeded project store from $PROJECT_SEED"
 fi
 
-python3 "$HERE/prompt.py" "$INSTANCE" > "$RUN/prompt.txt"
+# --oracle-test: put the official tests in the tree so the agent can actually run
+# them. The default run cannot -- the FAIL_TO_PASS tests do not exist at the base
+# commit, so the agent's only guide is the issue text, and when that text under-
+# specifies the contract (NOTES.md 结论 6, 结论 7) it has no way to find out.
+# grade.py is unaffected: it reverts the official test files and re-applies
+# test_patch itself before scoring, so an agent that edits them gains nothing.
+if [ -n "$ORACLE_TEST" ]; then
+	python3 "$HERE/instance.py" "$INSTANCE" test_patch > "$WS/.git/swecb-oracle-test.patch"
+	git -C "$WS" apply "$WS/.git/swecb-oracle-test.patch"
+	echo "oracle-test: applied test_patch to the workspace"
+fi
+
+python3 "$HERE/prompt.py" "$INSTANCE" ${ORACLE_TEST:+--oracle-test} > "$RUN/prompt.txt"
 PYTHONPATH="$HERE" python3 -c "
 import json,sys,instance
 json.dump(instance.load(sys.argv[1]), open(sys.argv[2],'w'), indent=2)" "$INSTANCE" "$RUN/instance.json"
